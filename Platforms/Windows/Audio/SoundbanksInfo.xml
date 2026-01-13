@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<SoundBanksInfo Platform="Windows" BasePlatform="Windows" SchemaVersion="10" SoundbankVersion="113">
+	<RootPaths>
+		<ProjectRoot>C:\Users\86183\Projects\WwiseProjects\ykkz000's Soviet Union\</ProjectRoot>
+		<SourceFilesRoot>C:\Users\86183\Projects\WwiseProjects\ykkz000's Soviet Union\.cache\Windows\</SourceFilesRoot>
+		<SoundBanksRoot>C:\Users\86183\Projects\WwiseProjects\ykkz000's Soviet Union\GeneratedSoundBanks\Windows\</SoundBanksRoot>
+		<ExternalSourcesInputFile></ExternalSourcesInputFile>
+		<ExternalSourcesOutputRoot>C:\Users\86183\Projects\WwiseProjects\ykkz000's Soviet Union\GeneratedSoundBanks\Windows\</ExternalSourcesOutputRoot>
+	</RootPaths>
+	<DialogueEvents/>
+	<StreamedFiles>
+		<File Id="111077084" Language="SFX">
+			<ShortName>苏联国歌-1977.wav</ShortName>
+			<Path>SFX\苏联国歌-1977_4B8CC0C5.wem</Path>
+		</File>
+		<File Id="215497229" Language="SFX">
+			<ShortName>布尔什维克党歌.wav</ShortName>
+			<Path>SFX\布尔什维克党歌_4B8CC0C5.wem</Path>
+		</File>
+		<File Id="289931151" Language="SFX">
+			<ShortName>苏联国歌-1977-2.wav</ShortName>
+			<Path>SFX\苏联国歌-1977-2_4B8CC0C5.wem</Path>
+		</File>
+		<File Id="835347259" Language="SFX">
+			<ShortName>红军最强大.wav</ShortName>
+			<Path>SFX\红军最强大_4B8CC0C5.wem</Path>
+		</File>
+		<File Id="858404713" Language="SFX">
+			<ShortName>共产国际之歌.wav</ShortName>
+			<Path>SFX\共产国际之歌_4B8CC0C5.wem</Path>
+		</File>
+		<File Id="948161784" Language="SFX">
+			<ShortName>国际歌.wav</ShortName>
+			<Path>SFX\国际歌_4B8CC0C5.wem</Path>
+		</File>
+		<File Id="960729092" Language="SFX">
+			<ShortName>苏联国歌-1944.wav</ShortName>
+			<Path>SFX\苏联国歌-1944_4B8CC0C5.wem</Path>
+		</File>
+	</StreamedFiles>
+	<MediaFilesNotInAnyBank/>
+	<SoundBanks>
+		<SoundBank Id="367840888" Language="SFX">
+			<ShortName>YKKZ000_SOVIET_UNION_Music_Bank</ShortName>
+			<Path>YKKZ000_SOVIET_UNION_Music_Bank.bnk</Path>
+			<IncludedEvents>
+				<Event Id="3415974462" Name="Pause_Music_YKKZ000_SOVIET_UNION"/>
+				<Event Id="2625564378" Name="Play_Leader_Music_YKKZ000_SOVIET_UNION"/>
+				<Event Id="1212512016" Name="Play_Music_YKKZ000_SOVIET_UNION"/>
+				<Event Id="3134498893" Name="Resume_Music_YKKZ000_SOVIET_UNION"/>
+				<Event Id="1948766648" Name="Start_Music_YKKZ000_SOVIET_UNION"/>
+				<Event Id="344750012" Name="Stop_Leader_Music_YKKZ000_SOVIET_UNION"/>
+				<Event Id="24979846" Name="Stop_Music_YKKZ000_SOVIET_UNION"/>
+			</IncludedEvents>
+			<ReferencedStreamedFiles>
+				<File Id="111077084"/>
+				<File Id="215497229"/>
+				<File Id="289931151"/>
+				<File Id="835347259"/>
+				<File Id="858404713"/>
+				<File Id="948161784"/>
+				<File Id="960729092"/>
+			</ReferencedStreamedFiles>
+		</SoundBank>
+		<SoundBank Id="1355168291" Language="SFX">
+			<ShortName>Init</ShortName>
+			<Path>Init.bnk</Path>
+		</SoundBank>
+	</SoundBanks>
+</SoundBanksInfo>

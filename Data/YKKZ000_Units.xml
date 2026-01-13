@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- YKKZ000_Units -->
+<!-- Author: ykkz000 -->
+<!-- DateCreated: 2/9/2024 5:28:58 PM -->
+<GameData>
+    <Types>
+        <Row Type="UNIT_YKKZ000_RED_ARMY" Kind="KIND_UNIT" />
+    </Types>
+    <UnitAiInfos>
+        <Row UnitType="UNIT_YKKZ000_RED_ARMY" AiType="UNITAI_COMBAT" />
+        <Row UnitType="UNIT_YKKZ000_RED_ARMY" AiType="UNITAI_EXPLORE" />
+        <Row UnitType="UNIT_YKKZ000_RED_ARMY" AiType="UNITTYPE_MELEE" />
+        <Row UnitType="UNIT_YKKZ000_RED_ARMY" AiType="UNITTYPE_LAND_COMBAT" />
+    </UnitAiInfos>
+    <Tags>
+        <Row Tag="CLASS_YKKZ000_RED_ARMY" Vocabulary="ABILITY_CLASS" />
+    </Tags>
+    <TypeTags>
+        <Row Type="UNIT_YKKZ000_RED_ARMY" Tag="CLASS_MELEE" />
+        <Row Type="UNIT_YKKZ000_RED_ARMY" Tag="CLASS_YKKZ000_RED_ARMY" />
+    </TypeTags>
+    <Units>
+        <Row UnitType="UNIT_YKKZ000_RED_ARMY" Cost="430" Maintenance="6" BaseMoves="2" BaseSightRange="2" ZoneOfControl="true" Domain="DOMAIN_LAND" Combat="75"
+            FormationClass="FORMATION_CLASS_LAND_COMBAT" PromotionClass="PROMOTION_CLASS_MELEE" AdvisorType="ADVISOR_CONQUEST" PurchaseYield="YIELD_GOLD" PrereqTech="TECH_REPLACEABLE_PARTS"
+            Name="LOC_UNIT_YKKZ000_RED_ARMY_NAME" Description="LOC_UNIT_YKKZ000_RED_ARMY_DESCRIPTION" TraitType="TRAIT_CIVILIZATION_YKKZ000_RED_ARMY" />
+    </Units>
+    <UnitReplaces>
+        <Row CivUniqueUnitType="UNIT_YKKZ000_RED_ARMY" ReplacesUnitType="UNIT_INFANTRY" />
+    </UnitReplaces>
+    <UnitUpgrades>
+        <Row Unit="UNIT_YKKZ000_RED_ARMY" UpgradeUnit="UNIT_MECHANIZED_INFANTRY"/>
+    </UnitUpgrades>
+</GameData>

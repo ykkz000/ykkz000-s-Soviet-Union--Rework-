@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<AssetObjects..XLP>
+	<m_Version>
+		<major>1</major>
+		<minor>0</minor>
+		<build>0</build>
+		<revision>0</revision>
+	</m_Version>
+	<m_ClassName text="UITexture"/>
+	<m_PackageName text="UI/Leaders"/>
+	<m_Entries>
+		<Element>
+			<m_EntryID text="LEADER_YKKZ000_VLADIMIR_LENIN_NEUTRAL"/>
+			<m_ObjectName text="LEADER_YKKZ000_VLADIMIR_LENIN_NEUTRAL"/>
+		</Element>
+		<Element>
+			<m_EntryID text="CIVILIZATION_YKKZ000_SOVIET_UNION_DIPLOMACY"/>
+			<m_ObjectName text="CIVILIZATION_YKKZ000_SOVIET_UNION_DIPLOMACY"/>
+		</Element>
+		<Element>
+			<m_EntryID text="LEADER_YKKZ000_JOSEPH_STALIN_NEUTRAL"/>
+			<m_ObjectName text="LEADER_YKKZ000_JOSEPH_STALIN_NEUTRAL"/>
+		</Element>
+	</m_Entries>
+	<m_AllowedPlatforms>
+		<Element>WINDOWS</Element>
+		<Element>LINUX</Element>
+		<Element>MACOS</Element>
+		<Element>IOS</Element>
+	</m_AllowedPlatforms>
+</AssetObjects..XLP>
+

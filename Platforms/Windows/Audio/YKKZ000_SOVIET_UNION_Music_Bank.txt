@@ -1,0 +1,11 @@
+Event	ID	Name			Wwise Object Path	Notes
+	24979846	Stop_Music_YKKZ000_SOVIET_UNION			\Default Work Unit\Music\Stop_Music_YKKZ000_SOVIET_UNION	
+	344750012	Stop_Leader_Music_YKKZ000_SOVIET_UNION			\Default Work Unit\Music\Stop_Leader_Music_YKKZ000_SOVIET_UNION	
+	1212512016	Play_Music_YKKZ000_SOVIET_UNION			\Default Work Unit\Music\Play_Music_YKKZ000_SOVIET_UNION	
+	1948766648	Start_Music_YKKZ000_SOVIET_UNION			\Default Work Unit\Music\Start_Music_YKKZ000_SOVIET_UNION	
+	2625564378	Play_Leader_Music_YKKZ000_SOVIET_UNION			\Default Work Unit\Music\Play_Leader_Music_YKKZ000_SOVIET_UNION	
+	3134498893	Resume_Music_YKKZ000_SOVIET_UNION			\Default Work Unit\Music\Resume_Music_YKKZ000_SOVIET_UNION	
+	3415974462	Pause_Music_YKKZ000_SOVIET_UNION			\Default Work Unit\Music\Pause_Music_YKKZ000_SOVIET_UNION	
+
+Streamed Audio	ID	Name	Audio source file	Generated audio file	Wwise Object Path	Notes
+	111077084	YKKZ000_SOVIET_UNION_Leader_Industrial_Era	C:\Users\86183\Projects\WwiseProjects\ykkz000's Soviet Union\.cache\Windows\SFX\	215497229	YKKZ000_SOVIET_UNION_Leader_Ancient_Era	C:\Users\86183\Projects\WwiseProjects\ykkz000's Soviet Union\.cache\Windows\SFX\	289931151	YKKZ000_SOVIET_UNION_Leader_Atomic_Era	C:\Users\86183\Projects\WwiseProjects\ykkz000's Soviet Union\.cache\Windows\SFX\	835347259	YKKZ000_SOVIET_UNION_Ambient02	C:\Users\86183\Projects\WwiseProjects\ykkz000's Soviet Union\.cache\Windows\SFX\	858404713	YKKZ000_SOVIET_UNION_Ambient03	C:\Users\86183\Projects\WwiseProjects\ykkz000's Soviet Union\.cache\Windows\SFX\	948161784	YKKZ000_SOVIET_UNION_Ambient01	C:\Users\86183\Projects\WwiseProjects\ykkz000's Soviet Union\.cache\Windows\SFX\	960729092	YKKZ000_SOVIET_UNION_Leader_Medieval_Era	C:\Users\86183\Projects\WwiseProjects\ykkz000's Soviet Union\.cache\Windows\SFX\
