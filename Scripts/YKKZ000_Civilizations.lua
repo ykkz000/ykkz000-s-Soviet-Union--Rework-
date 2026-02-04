@@ -9,7 +9,7 @@
 ---@param sTraitType string
 ---@return boolean
 local function __ykkz000_has_trait(pPlayer, sTraitType)
-    return (pPlayer:GetProperty('PROPERTY_' .. sTraitType) or 0) > 0;
+    return (pPlayer:GetProperty('PROPERTY_YKKZ000_' .. sTraitType) or 0) > 0;
 end
 
 ---@param pCity City
@@ -77,3 +77,20 @@ end
 
 GameEvents.CityBuilt.Add(TRAIT_LEADER_YKKZ000_FROM_ABILITY_TO_WORK_CITY_BUILD_PRODUCTION);
 GameEvents.OnCityPopulationChanged.Add(TRAIT_LEADER_YKKZ000_FROM_ABILITY_TO_WORK_POPULATION_CHANGE_PRODUCTION);
+
+for _, pPlayer in ipairs(Players) do
+    local pPlayerConfig = PlayerConfigurations[pPlayer:GetID()];
+    local sCivilizationType = pPlayerConfig:GetCivilizationTypeName();
+    local sLeaderType = pPlayerConfig:GetLeaderTypeName();
+    for row in GameInfo.CivilizationTraits() do
+        if (row.CivilizationType == sCivilizationType) then
+            pPlayer:SetProperty('PROPERTY_YKKZ000_' .. row.TraitType, 1);
+        end
+    end
+    for row in GameInfo.LeaderTraits() do
+        if (row.LeaderType == sLeaderType) then
+            pPlayer:SetProperty('PROPERTY_YKKZ000_' .. row.TraitType, 1);
+        end
+    end
+end
+

@@ -57,7 +57,7 @@
             <Text>大纵深作战理论</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_DESC" Language="zh_Hans_CN">
-            <Text>军事单位击杀单位后恢复 [ICON_Movement] 移动力和攻击次数。所有近战单位+1 [ICON_Movement] 移动力，+5 [ICON_Strength] 战斗力。生产单位所需战略资源花费减少40%且+15% [ICON_Production] 生产力。</Text>
+            <Text>军事单位击杀单位后恢复 [ICON_Movement] 移动力和攻击次数。所有近战单位+1 [ICON_Movement] 移动力，+5 [ICON_Strength] 战斗力。</Text>
         </Row>
         <!-- Districts -->
         <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_NAME" Language="zh_Hans_CN">
