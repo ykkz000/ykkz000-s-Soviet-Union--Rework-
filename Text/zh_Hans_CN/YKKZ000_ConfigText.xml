@@ -39,7 +39,7 @@
             <Text>各尽所能，按劳分配</Text>
         </Row>
         <Row Tag="LOC_TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK_DESC" Language="zh_Hans_CN">
-            <Text>所有城市每 [ICON_Citizen] 人口提供0.5 [ICON_Production] 生产力以及5% [ICON_Production] 生产力增幅。[NEWLINE]无法建造圣地，无法招募大预言家。</Text>
+            <Text>所有城市每 [ICON_Citizen] 人口提供0.5 [ICON_Production] 生产力以及3% [ICON_Production] 生产力增幅。[NEWLINE]无法建造圣地，无法招募大预言家。</Text>
         </Row>
         <Row Tag="LOC_TRAIT_CIVILIZATION_YKKZ000_KOLKHOZ_NAME" Language="zh_Hans_CN">
             <Text>集体农庄</Text>
@@ -51,7 +51,7 @@
             <Text>新经济政策</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_NEW_ECONOMIC_POLICY_DESC" Language="zh_Hans_CN">
-            <Text>所有 [ICON_TradeRoute] 国内商路+1 [ICON_Food] 食物和+1 [ICON_Production] 生产力。所有城市建成建筑时返还15% [ICON_Production] 生产力。</Text>
+            <Text>所有 [ICON_TradeRoute] 国内商路+2 [ICON_Food] 食物和+2 [ICON_Production] 生产力。</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_NAME" Language="zh_Hans_CN">
             <Text>大纵深作战理论</Text>
@@ -64,7 +64,7 @@
             <Text>集体农庄</Text>
         </Row>
         <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_DESCRIPTION" Language="zh_Hans_CN">
-            <Text>苏联特色区域，替代“工业区”，建造花费更低，且出现时间更早。[NEWLINE] [ICON_Production] 生产力相邻加成也能提供[ICON_Food] 食物。每与一个矿山相邻获得+1 [ICON_Production] 生产力。每与一个战略资源相邻获得+2 [ICON_Production] 生产力。</Text>
+            <Text>苏联特色区域，替代“工业区”，建造花费更低。[NEWLINE] [ICON_Production] 生产力相邻加成也能提供[ICON_Food] 食物。每与一个矿山相邻获得+1 [ICON_Production] 生产力。每与一个战略资源相邻获得+2 [ICON_Production] 生产力。</Text>
         </Row>
         <!-- Units -->
         <Row Tag="LOC_UNIT_YKKZ000_RED_ARMY_NAME" Language="zh_Hans_CN">
