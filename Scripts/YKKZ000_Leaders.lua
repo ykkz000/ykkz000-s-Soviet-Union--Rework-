@@ -21,10 +21,13 @@ function TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_KILL(iKilledPlayerI
     if (pPlayer == nil) then
         return;
     end
-    if (not __ykkz000_has_trait(pPlayer, "TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY")) then
+    if (not __ykkz000_has_trait(pPlayer, 'TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY')) then
         return;
     end
     local pUnit = UnitManager.GetUnit(iPlayerID, iUnitID);
+    if (not GameInfo.Units[pUnit:GetType()].PromotionClass == 'PROMOTION_CLASS_MELEE') then
+        return;
+    end
     UnitManager.RestoreUnitAttacks(pUnit);
     UnitManager.RestoreMovementToFormation(pUnit);
 end

@@ -57,7 +57,7 @@
             <Text>Grand Depth Operational Theory</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_DESC">
-            <Text>Military unit restore [ICON_Movement] Movementand attacks after killing. All melee units +1 [ICON_Movement] and +5 [ICON_Strength] Combat Strength.</Text>
+            <Text>Melee unit restore [ICON_Movement] Movementand attacks after killing. All melee units +1 [ICON_Movement] and +5 [ICON_Strength] Combat Strength.</Text>
         </Row>
         <!-- Districts -->
         <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_NAME">
