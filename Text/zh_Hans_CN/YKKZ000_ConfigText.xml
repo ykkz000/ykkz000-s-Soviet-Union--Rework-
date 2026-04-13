@@ -51,7 +51,7 @@
             <Text>新经济政策</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_NEW_ECONOMIC_POLICY_DESC" Language="zh_Hans_CN">
-            <Text>所有 [ICON_TradeRoute] 国内商路+2 [ICON_Food] 食物和+2 [ICON_Production] 生产力。</Text>
+            <Text>所有 [ICON_TradeRoute] 国内商路目的地每有一个特色区域+1 [ICON_Food] 食物和+1 [ICON_Production] 生产力。</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_NAME" Language="zh_Hans_CN">
             <Text>大纵深作战理论</Text>

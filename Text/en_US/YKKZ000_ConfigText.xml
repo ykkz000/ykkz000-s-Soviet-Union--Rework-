@@ -51,7 +51,7 @@
             <Text>New Economic Policy</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_NEW_ECONOMIC_POLICY_DESC">
-            <Text>All [ICON_TradeRoute] Domestic Trade Route +2 [ICON_Food] and +2 [ICON_Production] Production.</Text>
+            <Text>All [ICON_TradeRoute] Domestic Trade Route +1 [ICON_Food] and +1 [ICON_Production] Production per special district in destination.</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_NAME">
             <Text>Grand Depth Operational Theory</Text>
