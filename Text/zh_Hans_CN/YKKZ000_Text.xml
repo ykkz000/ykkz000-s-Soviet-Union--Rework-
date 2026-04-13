@@ -134,7 +134,7 @@
             <Text>弗拉基米尔·列宁，革命的浪潮已经到来。建立苏维埃，领导无产阶级推翻暴君，建立一个无产阶级专政的革命政权。全世界的劳动者，联合起来！</Text>
         </Row>
 		<Row Tag="LOC_LOADING_INFO_LEADER_YKKZ000_JOSEPH_STALIN" Language="zh_Hans_CN">
-            <Text></Text>
+            <Text>约瑟夫·斯大林，敌人的獠牙已显露，带领苏联，将敌人尽数击退，以一代人的斗争，决定未来苏联的国际地位吧！</Text>
         </Row>
 		<!--Diplomacy-->
 		<Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_VLADIMIR_LENIN_DECLARE_WAR" Language="zh_Hans_CN">

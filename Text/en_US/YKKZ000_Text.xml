@@ -134,7 +134,7 @@
             <Text>Vladimir Lenin, the wave of revolution has arrived. Establish the Soviets, lead the proletariat to overthrow the tyrant and establish a revolutionary regime under the dictatorship of the proletariat. All workers of all countries, unite!</Text>
         </Row>
 		<Row Tag="LOC_LOADING_INFO_LEADER_YKKZ000_JOSEPH_STALIN">
-            <Text></Text>
+            <Text>Joseph Stalin, the enemy’s fangs have been bared. Lead the Soviet Union to repel the enemy entirely, and let the struggle of a generation determine the future international standing of the Soviet Union!</Text>
         </Row>
         <!--Diplomacy-->
 		<Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_VLADIMIR_LENIN_DECLARE_WAR">
