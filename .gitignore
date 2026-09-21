@@ -3,3 +3,9 @@
 
 # Logs
 *.log
+
+# Agents
+.kilo
+.cline
+.codex
+.dsh
