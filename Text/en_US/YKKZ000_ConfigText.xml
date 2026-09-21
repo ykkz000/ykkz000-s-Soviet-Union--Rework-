@@ -51,7 +51,7 @@
             <Text>New Economic Policy</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_NEW_ECONOMIC_POLICY_DESC">
-            <Text>All [ICON_TradeRoute] Domestic Trade Route +1 [ICON_Food] and +1 [ICON_Production] Production per special district in destination.</Text>
+            <Text>The Kolkhoz gains a standard adjacency bonus from adjacent districts and provides 2 [ICON_Housing] Housing. Cities with a Kolkhoz gain 1 [ICON_Food] Food and 1.5 [ICON_Gold] Gold per [ICON_Citizen] Population.</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_NAME">
             <Text>Grand Depth Operational Theory</Text>
