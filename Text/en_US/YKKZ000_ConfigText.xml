@@ -51,7 +51,7 @@
             <Text>New Economic Policy</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_NEW_ECONOMIC_POLICY_DESC">
-            <Text>The Kolkhoz gains a standard adjacency bonus from adjacent districts and provides 2 [ICON_Housing] Housing. Cities with a Kolkhoz gain 1 [ICON_Food] Food and 1.5 [ICON_Gold] Gold per [ICON_Citizen] Population.</Text>
+            <Text>The Kolkhoz gains a standard adjacency bonus from adjacent districts and provides an additional 2 [ICON_Housing] Housing and 1 [ICON_Amenities] Amenity. Cities with a Kolkhoz gain 1 [ICON_Food] Food and 1.5 [ICON_Gold] Gold per [ICON_Citizen] Population.</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_NAME">
             <Text>Grand Depth Operational Theory</Text>
@@ -64,7 +64,7 @@
             <Text>Kolkhoz</Text>
         </Row>
         <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_DESCRIPTION">
-            <Text>A district unique to Soviet Union that is cheaper than the district it replaces, the Industrial Zone.[NEWLINE] [ICON_Production] Production adjacency bonus provides [ICON_Food] Food as well. +1 [ICON_Production] Production adjacency bonus from Mines. +2 [ICON_Production] Production adjacency bonus from strategic resources.</Text>
+            <Text>A district unique to Soviet Union for industrial activity. Replaces the Industrial Zone district. Available at Mining instead of Apprenticeship, does not require [ICON_Citizen] Population, and is cheaper to build.[NEWLINE][NEWLINE]Provides 2 [ICON_Housing] Housing and 1 [ICON_Amenities] Amenity. Citizen Yields (per Citizen in this district): +1 [ICON_Food] Food and +1 [ICON_Production] Production.[NEWLINE][NEWLINE][ICON_Production] Production adjacency bonus also provides [ICON_Food] Food. +1 [ICON_Production] Production adjacency bonus from Mines. +2 [ICON_Production] Production adjacency bonus from strategic resources.</Text>
         </Row>
         <!-- Units -->
         <Row Tag="LOC_UNIT_YKKZ000_RED_ARMY_NAME">
