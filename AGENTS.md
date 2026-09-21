@@ -61,6 +61,7 @@ ykkz000's Soviet Union (Rework)是一个使用Lua、XML和SQL（SQLite方言）�
 - **添加/删除文件**: 在添加或删除文件/目录后，同步更新`ykkz000's Soviet Union (Rework).civ6proj`文件的`<ItemGroup>`标签内容。另外判断文件在游戏中的加载时机以及作用，更新`<FrontEndActionData>`标签或`<InGameActionData>`标签的内容
 
 ## 7. 参考手册与目录
+- 文明6游戏wiki参考：[文明百科-文明VI](https://www.civilopedia.net/zh-CN/gathering-storm/concepts/intro/)
 - 文明6Lua参考：[Index - Civilization VI: Modding Knowledge Base](https://sukritact.github.io/Civilization-VI-Modding-Knowledge-Base/)
 - 文明6数据库参考：[笑笑/文明6mod教学 - 码云 - 开源中国](https://gitee.com/xiaoxiaoccat/civ-6-mod-tutorial/tree/master)
 - 文明6运行时日志：`%LocalAppData%\Firaxis Games\Sid Meier's Civilization VI/Logs`
