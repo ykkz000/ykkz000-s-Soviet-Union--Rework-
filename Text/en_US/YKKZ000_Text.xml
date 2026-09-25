@@ -35,7 +35,7 @@
 			<Text>+{1_Amount} From Grand Depth Operational Theory</Text>
 		</Row>
 		<Row Tag="LOC_COMBAT_PREVIEW_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_SUZERAIN">
-			<Text>+{1_Amount} From Suzerain City-States (Grand Depth Operational Theory)</Text>
+			<Text>+{1_Amount} [ICON_Strength] From Suzerain City-States (Grand Depth Operational Theory)</Text>
 		</Row>
         <!-- Cities -->
         <Row Tag="LOC_CITY_NAME_YKKZ000_SOVIET_UNION_2">
