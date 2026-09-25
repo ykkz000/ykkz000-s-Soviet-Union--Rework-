@@ -25,11 +25,21 @@ function TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_KILL(iKilledPlayerI
         return;
     end
     local pUnit = UnitManager.GetUnit(iPlayerID, iUnitID);
-    if (not GameInfo.Units[pUnit:GetType()].PromotionClass == 'PROMOTION_CLASS_MELEE') then
+    if (pUnit == nil) then
+        return;
+    end
+    local pUnitInfo = GameInfo.Units[pUnit:GetType()];
+    if (pUnitInfo == nil or pUnitInfo.PromotionClass ~= 'PROMOTION_CLASS_MELEE') then
         return;
     end
     UnitManager.RestoreUnitAttacks(pUnit);
     UnitManager.RestoreMovementToFormation(pUnit);
+    local iKills = (pUnit:GetProperty('PROPERTY_YKKZ000_STALIN_KILL_COUNT') or 0) + 1;
+    if (iKills >= 3) then
+        iKills = iKills - 3;
+        pPlayer:AttachModifierByID('YKKZ000_STALIN_ENVOY_REWARD');
+    end
+    pUnit:SetProperty('PROPERTY_YKKZ000_STALIN_KILL_COUNT', iKills);
 end
 
 Events.UnitKilledInCombat.Add(TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_KILL);
