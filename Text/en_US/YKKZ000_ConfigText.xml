@@ -51,7 +51,7 @@
             <Text>Decree on Peace</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_PEACE_DECREE_DESC">
-            <Text>+50% Influence Points. +100% Diplomatic Favor from Suzerain city-states. All cities gain +5% [ICON_Production] Production and [ICON_Food] Food for each city-state you are Suzerain of.</Text>
+            <Text>+50% Influence Points. All cities gain +5% [ICON_Production] Production and [ICON_Food] Food for each city-state you are Suzerain of.</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_NAME">
             <Text>Grand Depth Operational Theory</Text>

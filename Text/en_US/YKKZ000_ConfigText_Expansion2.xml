@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- YKKZ000_ConfigText_Expansion2 -->
+<!-- Author: ykkz000 -->
+<!-- DateCreated: 9/25/2026 -->
+<GameData>
+    <BaseGameText>
+        <!-- Traits -->
+        <Row Tag="LOC_TRAIT_LEADER_YKKZ000_PEACE_DECREE_DESC_EXPANSION2">
+            <Text>Cannot declare Surprise War, cannot declare war on a city-state, and cannot use the Holy War, Colonial War, or Territorial Expansion War casus belli.[NEWLINE]+50% Influence Points. +100% Diplomatic Favor from Suzerain city-states. All cities gain +5% [ICON_Production] Production and [ICON_Food] Food for each city-state you are Suzerain of.</Text>
+        </Row>
+    </BaseGameText>
+</GameData>

@@ -51,7 +51,7 @@
             <Text>和平法令</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_PEACE_DECREE_DESC" Language="zh_Hans_CN">
-            <Text>影响力点数 +50%。来自城邦的外交支持 +100%。每宗主一个城邦，所有城市 +5% [ICON_Production] 生产力和 [ICON_Food] 食物。</Text>
+            <Text>影响力点数 +50%。每宗主一个城邦，所有城市 +5% [ICON_Production] 生产力和 [ICON_Food] 食物。</Text>
         </Row>
         <Row Tag="LOC_TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_NAME" Language="zh_Hans_CN">
             <Text>大纵深作战理论</Text>
