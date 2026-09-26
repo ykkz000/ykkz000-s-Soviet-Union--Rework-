@@ -3,7 +3,7 @@
 <!-- Author: ykkz000 -->
 <!-- DateCreated: 2/8/2024 8:07:36 PM -->
 <GameData>
-    <IconDefinitions>
-        <Row Name="ICON_DISTRICT_YKKZ000_KOLKHOZ"                  Atlas="ICON_ATLAS_DISTRICTS" Index="9" />
-    </IconDefinitions>
+  <IconDefinitions>
+    <Row Name="ICON_DISTRICT_YKKZ000_KOLKHOZ"                  Atlas="ICON_ATLAS_DISTRICTS" Index="9" />
+  </IconDefinitions>
 </GameData>

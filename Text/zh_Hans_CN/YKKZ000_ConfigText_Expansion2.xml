@@ -3,10 +3,10 @@
 <!-- Author: ykkz000 -->
 <!-- DateCreated: 9/25/2026 -->
 <GameData>
-    <LocalizedText>
-        <!-- Traits -->
-        <Row Tag="LOC_TRAIT_LEADER_YKKZ000_PEACE_DECREE_DESC_EXPANSION2" Language="zh_Hans_CN">
-            <Text>无法宣布突袭战争，无法对城邦宣战，无法使用“圣战”“殖民战争”“领土扩张战争”战争借口。[NEWLINE]影响力点数 +50%。来自城邦的外交支持 +100%。每宗主一个城邦，所有城市 +5% [ICON_Production] 生产力和 [ICON_Food] 食物。</Text>
-        </Row>
-    </LocalizedText>
+  <LocalizedText>
+    <!-- Traits -->
+    <Row Tag="LOC_TRAIT_LEADER_YKKZ000_PEACE_DECREE_DESC_EXPANSION2" Language="zh_Hans_CN">
+      <Text>无法宣布突袭战争，无法对城邦宣战，无法使用“圣战”“殖民战争”“领土扩张战争”战争借口。[NEWLINE]影响力点数 +50%。来自城邦的外交支持 +100%。每宗主一个城邦，所有城市 +5% [ICON_Production] 生产力和 [ICON_Food] 食物。</Text>
+    </Row>
+  </LocalizedText>
 </GameData>

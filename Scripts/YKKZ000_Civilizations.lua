@@ -1,10 +1,3 @@
------@param pPlayer Player
------@param sCivilizationType string
------@return boolean
---function __ykkz000_su_check_civilization(pPlayer, sCivilizationType)
---    return PlayerConfigurations[pPlayer:GetID()]:GetCivilizationTypeName() == sCivilizationType;
---end
-
 ---@param pPlayer Player
 ---@param sTraitType string
 ---@return boolean
@@ -13,7 +6,7 @@ local function __ykkz000_has_trait(pPlayer, sTraitType)
 end
 
 ---@param pCity City
-function __ykkz000_su_city_production_adjust(pCity)
+local function __ykkz000_su_city_production_adjust(pCity)
     local pPlayerCityPopulationTable = Game:GetProperty("YKKZ000_SU_PLAYER_CITY_POPULATION_TABLE");
     if (type(pPlayerCityPopulationTable) ~= "table") then
         pPlayerCityPopulationTable = {};
@@ -48,7 +41,7 @@ end
 ---@param iCityID number
 ---@param iX number
 ---@param iY number
-function TRAIT_LEADER_YKKZ000_FROM_ABILITY_TO_WORK_CITY_BUILD_PRODUCTION(iCityOwner, iCityID, iX, iY)
+function TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK_CITY_BUILT(iCityOwner, iCityID, iX, iY)
     local pPlayer = PlayerManager.GetPlayer(iCityOwner);
     if (pPlayer == nil) then
         return;
@@ -63,7 +56,7 @@ end
 ---@param iCityOwner number
 ---@param iCityID number
 ---@param iAmountChanged number
-function TRAIT_LEADER_YKKZ000_FROM_ABILITY_TO_WORK_POPULATION_CHANGE_PRODUCTION(iCityOwner, iCityID, iAmountChanged)
+function TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK_POPULATION_CHANGED(iCityOwner, iCityID, iAmountChanged)
     local pPlayer = PlayerManager.GetPlayer(iCityOwner);
     if (pPlayer == nil) then
         return;
@@ -75,8 +68,8 @@ function TRAIT_LEADER_YKKZ000_FROM_ABILITY_TO_WORK_POPULATION_CHANGE_PRODUCTION(
     __ykkz000_su_city_production_adjust(pCity);
 end
 
-GameEvents.CityBuilt.Add(TRAIT_LEADER_YKKZ000_FROM_ABILITY_TO_WORK_CITY_BUILD_PRODUCTION);
-GameEvents.OnCityPopulationChanged.Add(TRAIT_LEADER_YKKZ000_FROM_ABILITY_TO_WORK_POPULATION_CHANGE_PRODUCTION);
+GameEvents.CityBuilt.Add(TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK_CITY_BUILT);
+GameEvents.OnCityPopulationChanged.Add(TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK_POPULATION_CHANGED);
 
 for _, pPlayer in ipairs(Players) do
     local pPlayerConfig = PlayerConfigurations[pPlayer:GetID()];
