@@ -17,6 +17,20 @@ constexpr std::size_t kFactoryHashOffset = 0x08;
 constexpr std::size_t kFactoryVTableSlots = 6;
 constexpr std::size_t kFactoryTypeIdSlot = 1;
 constexpr std::size_t kFactoryTypeNameSlot = 2;
+constexpr std::size_t kFactoryCreateSlot = 5;
+
+// 效果对象（Effects::AdjustCityYieldModifier 等 IModifierEffect 实现）布局：
+// +0x00 vtable，+0x08 YieldType 数组，+0x18 条目数（+0x10 容量），
+// +0x20 Amount 数组，+0x30 数量（+0x28 容量）。克隆槽数需覆盖 Apply/Remove
+// 及析构槽，32 槽远大于实际接口宽度，用于按函数指针定位并替换。
+constexpr std::size_t kEffectVTableCloneSlots = 32;
+constexpr std::size_t kEffectYieldTypeArrayOffset = 0x08;
+constexpr std::size_t kEffectEntryCountOffset = 0x18;
+constexpr std::size_t kEffectAmountArrayOffset = 0x20;
+constexpr std::size_t kEffectAmountCountOffset = 0x30;
+
+// City::Instance 人口字段（lGetPopulation / GetYieldFromPopulation 确认）。
+constexpr std::size_t kCityPopulationOffset = 0x268;
 
 // Registry<T>::GetTypes() 返回的 std::vector 三指针布局。
 constexpr std::size_t kVectorBeginOffset = 0x00;
@@ -31,6 +45,9 @@ struct GameCoreApi {
   void*   getEffectRegistry = nullptr; // Registry<IModifierEffectFactory>::GetTypes()
   void*   mallocTemp = nullptr;        // Platform::MallocTemp(size, file, line, a, b)
   void*   reserveVector = nullptr;     // std::vector::_Reserve(count) 成员函数
+  void*   effectApply = nullptr;       // Effects::AdjustCityYieldModifier::Apply
+  void*   effectRemove = nullptr;      // Effects::AdjustCityYieldModifier::Remove
+  void*   changeYieldModifier = nullptr; // City::Instance::ChangeYieldModifier(YieldTypes, int)
 };
 
 [[nodiscard]] std::wstring moduleDirectory();
@@ -46,6 +63,12 @@ void logMessage(int level, const char* message);
 // vtable_clone.cpp
 [[nodiscard]] void* cloneFactoryVTable(void* templateFactory);
 void rememberTypeName(std::uint32_t typeHash, const char* typeName);
+
+// custom_effect.cpp
+int registerEffectBehavior(std::uint32_t typeHash, bridge::EffectBehavior behavior,
+                           void* originalCreate);
+void* patchEffectObjectVTable(void* effectObject, std::uint32_t typeHash);
+[[nodiscard]] void* customFactoryCreateEntry();
 
 // plugin_manager.cpp
 void loadPlugins(bridge::Host* host);

@@ -35,6 +35,9 @@ struct BuildProfile {
   std::ptrdiff_t deltaGetEffectRegistry;
   std::ptrdiff_t deltaMallocTemp;
   std::ptrdiff_t deltaReserveVector;
+  std::ptrdiff_t rvaEffectApply;
+  std::ptrdiff_t rvaEffectRemove;
+  std::ptrdiff_t rvaChangeYieldModifier;
 };
 
 constexpr BuildProfile kKnownXp2Build{
@@ -43,6 +46,9 @@ constexpr BuildProfile kKnownXp2Build{
     -static_cast<std::ptrdiff_t>(0x148918),
     -static_cast<std::ptrdiff_t>(0x1130C8),
     -static_cast<std::ptrdiff_t>(0x11D6D8),
+    0x833930,   // Effects::AdjustCityYieldModifier::Apply
+    0x8343A0,   // Effects::AdjustCityYieldModifier::Remove
+    0x131E60,   // City::Instance::ChangeYieldModifier(YieldTypes, int)
 };
 
 // —— 候选路径（相对 loader 所在目录）：仅接受同目录被重命名的原版 XP2，
@@ -149,13 +155,32 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
     return const_cast<std::uint8_t*>(candidate);
   };
 
+  // 版本表新增项直接给出 RVA（不再相对锚点），同样要求落在可执行段。
+  auto computeRva = [&](std::ptrdiff_t rva) -> void* {
+    if (rva <= 0) {
+      return nullptr;
+    }
+    const auto* candidate = base + rva;
+    if (candidate < base || candidate >= base + size) {
+      return nullptr;
+    }
+    if (!isExecutableAddress(module, candidate)) {
+      return nullptr;
+    }
+    return const_cast<std::uint8_t*>(candidate);
+  };
+
   GameCoreApi resolved;
   resolved.getEffectRegistry = compute(kKnownXp2Build.deltaGetEffectRegistry);
   resolved.mallocTemp = compute(kKnownXp2Build.deltaMallocTemp);
   resolved.reserveVector = compute(kKnownXp2Build.deltaReserveVector);
+  resolved.effectApply = computeRva(kKnownXp2Build.rvaEffectApply);
+  resolved.effectRemove = computeRva(kKnownXp2Build.rvaEffectRemove);
+  resolved.changeYieldModifier = computeRva(kKnownXp2Build.rvaChangeYieldModifier);
   resolved.module = module;
   if (resolved.getEffectRegistry == nullptr || resolved.mallocTemp == nullptr ||
-      resolved.reserveVector == nullptr) {
+      resolved.reserveVector == nullptr || resolved.effectApply == nullptr ||
+      resolved.effectRemove == nullptr || resolved.changeYieldModifier == nullptr) {
     return false;
   }
 

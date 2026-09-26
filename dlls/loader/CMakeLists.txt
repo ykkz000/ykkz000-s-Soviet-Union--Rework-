@@ -6,6 +6,7 @@ add_library(YKKZ000Loader SHARED
   src/gamecore.cpp
   src/registry.cpp
   src/vtable_clone.cpp
+  src/custom_effect.cpp
   src/plugin_manager.cpp
   loader.def)
 

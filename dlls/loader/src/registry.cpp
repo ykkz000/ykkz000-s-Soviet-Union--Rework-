@@ -88,6 +88,24 @@ int registerEffectType(const bridge::EffectDesc* desc) {
     return -4;
   }
 
+  // 自定义行为：把克隆工厂的 Create 槽指向本 Loader 的入口，并记录模板 Create
+  // 以便在入口内部复用引擎的参数解析。
+  if (desc->behavior != bridge::EffectBehavior::kInherit) {
+    if (desc->behavior != bridge::EffectBehavior::kCityYieldModifierPerPopulation) {
+      logMessage(0, "registerEffectType: 未知的自定义效果行为");
+      return -8;
+    }
+    auto* templateVtable = *reinterpret_cast<void***>(templateFactory);
+    void* templateCreate =
+        templateVtable != nullptr ? templateVtable[kFactoryCreateSlot] : nullptr;
+    if (templateCreate == nullptr) {
+      logMessage(0, "registerEffectType: 模板工厂缺少 Create 槽");
+      return -8;
+    }
+    static_cast<void**>(vtable)[kFactoryCreateSlot] = customFactoryCreateEntry();
+    registerEffectBehavior(typeHash, desc->behavior, templateCreate);
+  }
+
   rememberTypeName(typeHash, desc->typeName);
 
   auto* factory = reinterpret_cast<MallocTempFn>(api.mallocTemp)(

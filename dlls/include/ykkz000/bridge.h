@@ -6,7 +6,13 @@
 // 仅使用 POD、函数指针与 const char*；不跨 DLL 传递 std:: 对象或异常。
 namespace ykkz000::bridge {
 
-inline constexpr std::uint32_t kHostApiVersion = 1;
+inline constexpr std::uint32_t kHostApiVersion = 2;
+
+// 自定义效果行为：决定 Loader 是否为该 EffectType 安装专属处理器。
+enum class EffectBehavior : std::int32_t {
+  kInherit = 0,                        // 完全复用模板行为
+  kCityYieldModifierPerPopulation = 1, // 每人口 × Amount% 的城市产出修正
+};
 
 struct EffectDesc {
   const char* typeName;          // 必填，如 "EFFECT_YKKZ000_SOVIET_FIVE_YEAR_PLAN"
@@ -18,6 +24,7 @@ struct EffectDesc {
   const char* contextInterfaces;
   const char* subjectInterfaces;
   int         supportsRemove;    // -1 = 继承模板
+  EffectBehavior behavior;       // 末尾追加（kInherit = 复用模板）
 };
 
 using MakeHashFn           = std::uint32_t (*)(const char*);
