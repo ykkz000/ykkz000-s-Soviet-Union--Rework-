@@ -116,7 +116,8 @@
     <Row TraitType="TRAIT_AGENDA_YKKZ000_SOCIAL_CHAUVINISM" ModifierId="TRAIT_YKKZ000_SOCIAL_CHAUVINISM_SAME_GOVERNMENT" />
   </TraitModifiers>
   <Modifiers>
-    <!-- Fixed -->
+    <!-- Statically bound leader traits (non-agenda) -->
+    <!-- Peace Decree: +50% Influence Points; +5% Production and Food per suzerain city-state (GS-only favor/banned-action modifiers live in Data/YKKZ000_Leaders_Expansion2.sql) -->
     <!-- PEACE_DECREE -->
     <Row ModifierId="TRAIT_YKKZ000_PEACE_DECREE_INFLUENCE" ModifierType="MODIFIER_PLAYER_GOVERNMENT_FLAT_BONUS" />
     <Row ModifierId="TRAIT_YKKZ000_PEACE_DECREE_PRODUCTION_PER_TRIBUTARY" ModifierType="MODIFIER_PLAYER_ADJUST_YIELD_MODIFIER_PER_TRIBUTARY" />
@@ -124,9 +125,11 @@
     <!-- GRAND_DEPTH_OPERATIONAL_THEORY -->
     <Row ModifierId="TRAIT_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_ADJUST_COMBAT_STRENGTH_MELEE" ModifierType="MODIFIER_PLAYER_UNITS_ADJUST_COMBAT_STRENGTH" SubjectRequirementSetId="REQUIRESETS_YKKZ000_UNIT_IS_MELEE" />
     <Row ModifierId="TRAIT_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_ADJUST_MOVEMENT_MELEE" ModifierType="MODIFIER_PLAYER_UNITS_ADJUST_MOVEMENT" SubjectRequirementSetId="REQUIRESETS_YKKZ000_UNIT_IS_MELEE" />
+    <!-- Per suzerain city-state +1 Combat Strength: the city-state trait (YKKZ000_STALIN_SUZERAIN_ATTACH) attaches YKKZ000_STALIN_SUZERAIN_COMBAT to the suzerain player, which attaches YKKZ000_STALIN_SUZERAIN_COMBAT_UNIT to each unit -->
     <Row ModifierId="YKKZ000_STALIN_SUZERAIN_ATTACH" ModifierType="MODIFIER_ALL_PLAYERS_ATTACH_MODIFIER" SubjectRequirementSetId="REQUIRESETS_YKKZ000_STALIN_SUZERAIN" />
     <Row ModifierId="YKKZ000_STALIN_SUZERAIN_COMBAT" ModifierType="MODIFIER_PLAYER_UNITS_ATTACH_MODIFIER" />
     <Row ModifierId="YKKZ000_STALIN_SUZERAIN_COMBAT_UNIT" ModifierType="MODIFIER_UNIT_ADJUST_COMBAT_STRENGTH" />
+    <!-- Granted at runtime by Lua (Scripts/YKKZ000_Leaders.lua): 1 free envoy per 3 melee kills -->
     <Row ModifierId="YKKZ000_STALIN_ENVOY_REWARD" ModifierType="MODIFIER_PLAYER_GRANT_INFLUENCE_TOKEN" RunOnce="true" Permanent="true" />
     <!-- INTERNATIONALISM(Agenda) -->
     <Row ModifierId="TRAIT_YKKZ000_INTERNATIONALISM_DECLARE_WAR" ModifierType="MODIFIER_PLAYER_DIPLOMACY_SIMPLE_MODIFIER" SubjectRequirementSetId="PLAYER_DECLARES_WAR" />
@@ -136,7 +139,7 @@
     <Row ModifierId="TRAIT_YKKZ000_SOCIAL_CHAUVINISM_SAME_GOVERNMENT" ModifierType="MODIFIER_PLAYER_DIPLOMACY_SIMPLE_MODIFIER" SubjectRequirementSetId="AGENDA_REQUIRE_PLAYER_HAS_SAME_GOVERNMENT" />
   </Modifiers>
   <ModifierArguments>
-    <!-- Fixed -->
+    <!-- Arguments of the statically bound leader traits (non-agenda) -->
     <!-- PEACE_DECREE -->
     <Row ModifierId="TRAIT_YKKZ000_PEACE_DECREE_INFLUENCE" Name="BonusType" Value="GOVERNMENTBONUS_ENVOYS" />
     <Row ModifierId="TRAIT_YKKZ000_PEACE_DECREE_INFLUENCE" Name="Amount" Value="50" />

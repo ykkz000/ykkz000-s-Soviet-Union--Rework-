@@ -27,6 +27,7 @@ function TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_KILL(iKilledPlayerI
     end
     UnitManager.RestoreUnitAttacks(pUnit);
     UnitManager.RestoreMovementToFormation(pUnit);
+    -- Melee units: every 3 kills grants the owning player 1 free envoy; the kill count is stored on the unit.
     local iKills = (pUnit:GetProperty('PROPERTY_YKKZ000_STALIN_KILL_COUNT') or 0) + 1;
     if (iKills >= 3) then
         iKills = iKills - 3;

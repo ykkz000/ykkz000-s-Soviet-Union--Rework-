@@ -5,6 +5,7 @@ local function __ykkz000_has_trait(pPlayer, sTraitType)
     return (pPlayer:GetProperty('PROPERTY_YKKZ000_' .. sTraitType) or 0) > 0;
 end
 
+-- Keeps the per-citizen +-5% Production modifiers in sync with the city's population growth (positive/negative modifiers).
 ---@param pCity City
 local function __ykkz000_su_city_production_adjust(pCity)
     local pPlayerCityPopulationTable = Game:GetProperty("YKKZ000_SU_PLAYER_CITY_POPULATION_TABLE");
