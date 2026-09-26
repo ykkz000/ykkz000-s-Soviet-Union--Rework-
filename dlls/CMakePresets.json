@@ -1,0 +1,28 @@
+{
+  "version": 3,
+  "configurePresets": [
+    {
+      "name": "x64-v143",
+      "displayName": "x64 MSVC (Visual Studio, C++20)",
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
+      "binaryDir": "${sourceDir}/build/v143",
+      "cacheVariables": { "CMAKE_CXX_STANDARD": "20" }
+    },
+    {
+      "name": "x64-ninja",
+      "displayName": "x64 Ninja (C++20)",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/ninja",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_CXX_STANDARD": "20"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "v143-debug", "configurePreset": "x64-v143", "configuration": "Debug" },
+    { "name": "v143-release", "configurePreset": "x64-v143", "configuration": "RelWithDebInfo" },
+    { "name": "ninja-rel", "configurePreset": "x64-ninja" }
+  ]
+}

@@ -1,0 +1,4 @@
+LIBRARY Plugin_YKKZ000_Soviet_Union
+EXPORTS
+  GetPlugin
+  DestroyPlugin
