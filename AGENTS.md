@@ -56,7 +56,7 @@ ykkz000's Soviet Union (Rework)是一个使用Lua、XML和SQL（SQLite方言）�
 - **提交控制**：仅暂存流程中的修改的文件，提交后上传到远程仓库
 
 ## 6. 安全与重要约束
-- **允许修改**: `Data/`、`Text/`、`Scripts/`、`ykkz000's Soviet Union (Rework).civ6proj`
+- **允许修改**: `.tools`、`Data/`、`Text/`、`Scripts/`、`ykkz000's Soviet Union (Rework).civ6proj`
 - **禁止修改**: 除允许修改的列表以外的任何目录和文件
 - **添加/删除文件**: 在添加或删除文件/目录后，同步更新`ykkz000's Soviet Union (Rework).civ6proj`文件的`<ItemGroup>`标签内容。另外判断文件在游戏中的加载时机以及作用，更新`<FrontEndActionData>`标签或`<InGameActionData>`标签的内容
 
