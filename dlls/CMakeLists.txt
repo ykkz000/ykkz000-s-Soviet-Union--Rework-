@@ -28,5 +28,6 @@ target_include_directories(ykkz000_bridge INTERFACE
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
 target_compile_features(ykkz000_bridge INTERFACE cxx_std_20)
 
+add_subdirectory(third_party/minhook)
 add_subdirectory(loader)
 add_subdirectory(plugin)

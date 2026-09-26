@@ -6,7 +6,7 @@
 // 仅使用 POD、函数指针与 const char*；不跨 DLL 传递 std:: 对象或异常。
 namespace ykkz000::bridge {
 
-inline constexpr std::uint32_t kHostApiVersion = 2;
+inline constexpr std::uint32_t kHostApiVersion = 3;
 
 // 自定义效果行为：决定 Loader 是否为该 EffectType 安装专属处理器。
 enum class EffectBehavior : std::int32_t {
@@ -14,17 +14,12 @@ enum class EffectBehavior : std::int32_t {
   kCityYieldModifierPerPopulation = 1, // 每人口 × Amount% 的城市产出修正
 };
 
+// 注意：GameEffects 元数据由引擎依模板的 GetTypeInfo 写入，
+// 自定义元数据在当前机制下不受支持，故此处不提供相应字段。
 struct EffectDesc {
-  const char* typeName;          // 必填，如 "EFFECT_YKKZ000_SOVIET_FIVE_YEAR_PLAN"
-  const char* templateEffect;    // 必填，复用行为的已有效果名
-  const char* commonName;        // 可空 = 继承模板
-  const char* description;
-  const char* tags;
-  const char* gameCapabilities;
-  const char* contextInterfaces;
-  const char* subjectInterfaces;
-  int         supportsRemove;    // -1 = 继承模板
-  EffectBehavior behavior;       // 末尾追加（kInherit = 复用模板）
+  const char* typeName;          // 必填
+  const char* templateEffect;    // 必填，复用其行为与参数定义的已有效果名
+  EffectBehavior behavior;       // kInherit = 复用模板行为
 };
 
 using MakeHashFn           = std::uint32_t (*)(const char*);
