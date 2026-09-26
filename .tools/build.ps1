@@ -1,5 +1,19 @@
 #Requires -Version 5.1
 
+# --- DLL build and deployment conventions ---
+# The loader is produced by dlls/loader (OUTPUT_NAME equals $LoaderBuildDll) and is
+# deployed as <DllPrefix>_FinalRelease.dll. The plugin is produced by dlls/plugin and
+# is deployed into the dedicated directory scanned by the loader. DllPrefix must match
+# the DllPrefix used in Data/YKKZ000_GameCores.sql.
+$LoaderTarget     = 'YKKZ000Loader'
+$PluginTarget     = 'YKKZ000SovietUnionPlugin'
+$LoaderBuildDll   = 'GameCore_YKKZ000_Loader_XP2.dll'
+$PluginDll        = 'Plugin_YKKZ000_Soviet_Union.dll'
+$DeployBinRel     = 'Binaries/Win64'
+$DeployPluginRel  = 'Binaries/Win64/ykkz000_civ6_plugin'
+$DefaultDllPrefix = 'GameCore_YKKZ000_Loader_XP2'
+$DefaultDllConfig = 'RelWithDebInfo'
+
 function Get-UsageText {
   return @"
 Usage: build.ps1 <project.civ6proj> [options]
@@ -17,7 +31,25 @@ Options:
                             Civilization VI\Mods\<projectName>
       --skip-art            Do not run the asset cooker; reuse the art already
                             present in the output directory.
-      --clean               Delete the output directory before building.
+      --clean               Delete the output directory and the DLL build
+                            directory before building.
+      --skip-dll            Do not build or deploy the GameCore DLLs; reuse
+                            the DLLs already present in the output directory.
+      --cmake <path>        Path to cmake.exe.
+                            Default: cmake found on PATH.
+      --dll-dir <path>      CMake source directory for the DLLs.
+                            Default: <projectDir>\dlls
+      --dll-build-dir <path>
+                            CMake build directory, removed by --clean.
+                            Default: <dll-dir>\build
+      --dll-prefix <name>   Deployed loader DLL prefix; must match the
+                            DllPrefix in Data/YKKZ000_GameCores.sql.
+                            Default: GameCore_YKKZ000_Loader_XP2
+      --dll-config <cfg>    CMake build configuration.
+                            Default: RelWithDebInfo
+      --dll-generator <gen>
+                            CMake generator for the DLL build.
+                            Default: the CMake default (Visual Studio).
       --base-assets <path>  Civilization VI SDK Assets root.
                             Default: C:\Program Files (x86)\Steam\steamapps\
                             common\Sid Meier's Civilization VI SDK Assets
@@ -38,13 +70,20 @@ function Parse-Args {
   if ($null -eq $ArgList) { $ArgList = @() }
 
   $opts = [ordered]@{
-    Input      = $null
-    Output     = $null
-    SkipArt    = $false
-    Clean      = $false
-    BaseAssets = "C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI SDK Assets"
-    BaseSdk    = "C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI SDK"
-    Help       = $false
+    Input        = $null
+    Output       = $null
+    SkipArt      = $false
+    SkipDll      = $false
+    Clean        = $false
+    BaseAssets   = "C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI SDK Assets"
+    BaseSdk      = "C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI SDK"
+    CMake        = $null
+    DllDir       = $null
+    DllBuildDir  = $null
+    DllPrefix    = $DefaultDllPrefix
+    DllConfig    = $DefaultDllConfig
+    DllGenerator = $null
+    Help         = $false
   }
 
   $i = 0
@@ -99,6 +138,88 @@ function Parse-Args {
     }
     elseif ($a -eq '--clean') {
       $opts.Clean = $true
+      $i++
+    }
+    elseif ($a -eq '--skip-dll') {
+      $opts.SkipDll = $true
+      $i++
+    }
+    elseif ($a -eq '--cmake') {
+      if ($i + 1 -ge $ArgList.Count) { throw "Option '$a' requires a value." }
+      $v = $ArgList[$i + 1]
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '$a' requires a value." }
+      $opts.CMake = $v
+      $i += 2
+    }
+    elseif ($a -like '--cmake=*') {
+      $v = $a.Substring('--cmake='.Length)
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '--cmake' requires a value." }
+      $opts.CMake = $v
+      $i++
+    }
+    elseif ($a -eq '--dll-dir') {
+      if ($i + 1 -ge $ArgList.Count) { throw "Option '$a' requires a value." }
+      $v = $ArgList[$i + 1]
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '$a' requires a value." }
+      $opts.DllDir = $v
+      $i += 2
+    }
+    elseif ($a -like '--dll-dir=*') {
+      $v = $a.Substring('--dll-dir='.Length)
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '--dll-dir' requires a value." }
+      $opts.DllDir = $v
+      $i++
+    }
+    elseif ($a -eq '--dll-build-dir') {
+      if ($i + 1 -ge $ArgList.Count) { throw "Option '$a' requires a value." }
+      $v = $ArgList[$i + 1]
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '$a' requires a value." }
+      $opts.DllBuildDir = $v
+      $i += 2
+    }
+    elseif ($a -like '--dll-build-dir=*') {
+      $v = $a.Substring('--dll-build-dir='.Length)
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '--dll-build-dir' requires a value." }
+      $opts.DllBuildDir = $v
+      $i++
+    }
+    elseif ($a -eq '--dll-prefix') {
+      if ($i + 1 -ge $ArgList.Count) { throw "Option '$a' requires a value." }
+      $v = $ArgList[$i + 1]
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '$a' requires a value." }
+      $opts.DllPrefix = $v
+      $i += 2
+    }
+    elseif ($a -like '--dll-prefix=*') {
+      $v = $a.Substring('--dll-prefix='.Length)
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '--dll-prefix' requires a value." }
+      $opts.DllPrefix = $v
+      $i++
+    }
+    elseif ($a -eq '--dll-config') {
+      if ($i + 1 -ge $ArgList.Count) { throw "Option '$a' requires a value." }
+      $v = $ArgList[$i + 1]
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '$a' requires a value." }
+      $opts.DllConfig = $v
+      $i += 2
+    }
+    elseif ($a -like '--dll-config=*') {
+      $v = $a.Substring('--dll-config='.Length)
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '--dll-config' requires a value." }
+      $opts.DllConfig = $v
+      $i++
+    }
+    elseif ($a -eq '--dll-generator') {
+      if ($i + 1 -ge $ArgList.Count) { throw "Option '$a' requires a value." }
+      $v = $ArgList[$i + 1]
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '$a' requires a value." }
+      $opts.DllGenerator = $v
+      $i += 2
+    }
+    elseif ($a -like '--dll-generator=*') {
+      $v = $a.Substring('--dll-generator='.Length)
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '--dll-generator' requires a value." }
+      $opts.DllGenerator = $v
       $i++
     }
     elseif ($a.Length -gt 1 -and $a[0] -eq '-') {
@@ -178,16 +299,66 @@ function Assert-Inputs {
     $out = Remove-TrailingSeparator (Resolve-FullPath $opts.Output)
   }
 
+  $skipDll = [bool]$opts.SkipDll
+  if ([string]::IsNullOrEmpty($opts.DllDir)) {
+    $dllDir = Join-Path $projectDir 'dlls'
+  }
+  else {
+    $dllDir = Remove-TrailingSeparator (Resolve-FullPath $opts.DllDir)
+  }
+  if ([string]::IsNullOrEmpty($opts.DllBuildDir)) {
+    $dllBuildDir = Join-Path $dllDir 'build'
+  }
+  else {
+    $dllBuildDir = Remove-TrailingSeparator (Resolve-FullPath $opts.DllBuildDir)
+  }
+  $dllPrefix = $opts.DllPrefix
+  $dllConfig = $opts.DllConfig
+  $dllGenerator = $opts.DllGenerator
+
+  if ([string]::IsNullOrWhiteSpace($dllPrefix)) {
+    throw "The DLL prefix must not be empty."
+  }
+  if ($dllPrefix -like '*_FinalRelease*') {
+    throw "The DLL prefix must not contain '_FinalRelease': $dllPrefix"
+  }
+  if ($dllPrefix -match '[\\/:*?"<>|]' -or $dllPrefix -eq '.' -or $dllPrefix -eq '..') {
+    throw "The DLL prefix must be a bare file name without path separators: $dllPrefix"
+  }
+
+  $sqlPrefix = Read-GameCoreDllPrefix -ProjectDir $projectDir
+  if (-not [string]::IsNullOrEmpty($sqlPrefix) -and $sqlPrefix -ne $dllPrefix) {
+    throw "The DLL prefix '$dllPrefix' does not match the DllPrefix '$sqlPrefix' declared in Data/YKKZ000_GameCores.sql."
+  }
+
+  $cmake = $null
+  if (-not $skipDll) {
+    if (-not (Test-Path -LiteralPath $dllDir -PathType Container)) {
+      throw "DLL source directory not found: $dllDir"
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $dllDir 'CMakeLists.txt') -PathType Leaf)) {
+      throw "CMakeLists.txt was not found in the DLL source directory: $dllDir"
+    }
+    $cmake = Resolve-CMakePath -Explicit $opts.CMake
+  }
+
   return [pscustomobject]@{
-    InputPath   = $inputPath
-    ProjectDir  = $projectDir
-    ProjectName = $projectName
-    Out         = $out
-    DefaultOut  = $defaultOut
-    BaseAssets  = (Resolve-FullPath $opts.BaseAssets)
-    BaseSdk     = (Resolve-FullPath $opts.BaseSdk)
-    SkipArt     = [bool]$opts.SkipArt
-    Clean       = [bool]$opts.Clean
+    InputPath    = $inputPath
+    ProjectDir   = $projectDir
+    ProjectName  = $projectName
+    Out          = $out
+    DefaultOut   = $defaultOut
+    BaseAssets   = (Resolve-FullPath $opts.BaseAssets)
+    BaseSdk      = (Resolve-FullPath $opts.BaseSdk)
+    SkipArt      = [bool]$opts.SkipArt
+    Clean        = [bool]$opts.Clean
+    SkipDll      = $skipDll
+    CMake        = $cmake
+    DllDir       = $dllDir
+    DllBuildDir  = $dllBuildDir
+    DllPrefix    = $dllPrefix
+    DllConfig    = $dllConfig
+    DllGenerator = $dllGenerator
   }
 }
 
@@ -309,6 +480,164 @@ function Copy-ContentFiles {
   }
 
   return [pscustomobject]@{ Count = $result.Count; Files = $result }
+}
+
+function Read-GameCoreDllPrefix {
+  param([string]$ProjectDir)
+
+  $sqlPath = Join-Path (Join-Path $ProjectDir 'Data') 'YKKZ000_GameCores.sql'
+  if (-not (Test-Path -LiteralPath $sqlPath -PathType Leaf)) {
+    return $null
+  }
+  $text = [System.IO.File]::ReadAllText($sqlPath)
+  $match = [regex]::Match($text, "DllPrefix\s*=\s*'([^']*)'")
+  if (-not $match.Success) {
+    return $null
+  }
+  return $match.Groups[1].Value
+}
+
+function Resolve-CMakePath {
+  param([string]$Explicit)
+
+  if (-not [string]::IsNullOrWhiteSpace($Explicit)) {
+    $command = Get-Command $Explicit -ErrorAction SilentlyContinue
+    if ($null -ne $command) { return $command.Source }
+    $full = Resolve-FullPath $Explicit
+    if (-not (Test-Path -LiteralPath $full -PathType Leaf)) {
+      throw "cmake was not found at the given path: $full"
+    }
+    return $full
+  }
+
+  $command = Get-Command cmake -ErrorAction SilentlyContinue
+  if ($null -eq $command) {
+    throw "cmake was not found on PATH. Install CMake (https://cmake.org/download/) or pass --cmake <path>."
+  }
+  return $command.Source
+}
+
+function Invoke-DllBuild {
+  param(
+    [string]$CMake,
+    [string]$DllDir,
+    [string]$BuildDir,
+    [string]$Config,
+    [string]$Generator
+  )
+
+  if (-not (Test-Path -LiteralPath (Join-Path $DllDir 'CMakeLists.txt') -PathType Leaf)) {
+    throw "CMakeLists.txt was not found in the DLL source directory: $DllDir"
+  }
+  if (-not (Test-Path -LiteralPath $BuildDir -PathType Container)) {
+    New-Item -ItemType Directory -Path $BuildDir -Force -ErrorAction Stop | Out-Null
+  }
+
+  $generatorArgs = @()
+  $cacheFile = Join-Path $BuildDir 'CMakeCache.txt'
+  if (-not (Test-Path -LiteralPath $cacheFile -PathType Leaf)) {
+    if (-not [string]::IsNullOrWhiteSpace($Generator)) {
+      $generatorArgs += @('-G', $Generator)
+    }
+    if ([string]::IsNullOrWhiteSpace($Generator) -or $Generator -like 'Visual Studio*') {
+      $generatorArgs += @('-A', 'x64')
+    }
+  }
+
+  Write-Host ("Configuring the DLL build in {0}" -f $BuildDir)
+  & $CMake -S $DllDir -B $BuildDir @generatorArgs
+  if ($LASTEXITCODE -ne 0) {
+    throw "CMake configuration failed (exit $LASTEXITCODE)."
+  }
+
+  Write-Host ("Building DLL targets: {0}, {1}" -f $LoaderTarget, $PluginTarget)
+  & $CMake --build $BuildDir --config $Config --target $LoaderTarget $PluginTarget
+  if ($LASTEXITCODE -ne 0) {
+    throw "CMake build failed (exit $LASTEXITCODE)."
+  }
+}
+
+function Find-DllArtifact {
+  param([string]$BuildDir, [string]$Config, [string]$FileName)
+
+  $direct = Join-Path (Join-Path $BuildDir 'bin') $FileName
+  if (Test-Path -LiteralPath $direct -PathType Leaf) { return $direct }
+
+  $perConfig = Join-Path (Join-Path (Join-Path $BuildDir 'bin') $Config) $FileName
+  if (Test-Path -LiteralPath $perConfig -PathType Leaf) { return $perConfig }
+
+  $matches = @(Get-ChildItem -LiteralPath $BuildDir -Recurse -Filter $FileName -File -ErrorAction SilentlyContinue)
+  if ($matches.Count -eq 1) { return $matches[0].FullName }
+  if ($matches.Count -eq 0) {
+    throw "The DLL artifact '$FileName' was not found under '$BuildDir'."
+  }
+  throw "More than one '$FileName' was found under '$BuildDir'; cannot determine the build output."
+}
+
+function Copy-DllArtifacts {
+  param($Ctx)
+
+  $binDir = Join-Path $Ctx.Out $DeployBinRel
+  $pluginDir = Join-Path $Ctx.Out $DeployPluginRel
+  New-Item -ItemType Directory -Path $binDir -Force -ErrorAction Stop | Out-Null
+  New-Item -ItemType Directory -Path $pluginDir -Force -ErrorAction Stop | Out-Null
+
+  $loaderSrc = Find-DllArtifact -BuildDir $Ctx.DllBuildDir -Config $Ctx.DllConfig -FileName $LoaderBuildDll
+  $pluginSrc = Find-DllArtifact -BuildDir $Ctx.DllBuildDir -Config $Ctx.DllConfig -FileName $PluginDll
+
+  $loaderName = $Ctx.DllPrefix + '_FinalRelease.dll'
+  $loaderDst = Join-Path $binDir $loaderName
+  $pluginDst = Join-Path $pluginDir $PluginDll
+  if (-not (Test-PathUnder $loaderDst $Ctx.Out)) {
+    throw "The loader deploy path escapes the output directory: $loaderDst"
+  }
+  if (-not (Test-PathUnder $pluginDst $Ctx.Out)) {
+    throw "The plugin deploy path escapes the output directory: $pluginDst"
+  }
+  Copy-Item -LiteralPath $loaderSrc -Destination $loaderDst -Force -ErrorAction Stop
+  Copy-Item -LiteralPath $pluginSrc -Destination $pluginDst -Force -ErrorAction Stop
+
+  return @(
+    ($DeployBinRel + '/' + $loaderName),
+    ($DeployPluginRel + '/' + $PluginDll)
+  )
+}
+
+function Get-DeployedDllFiles {
+  param($Ctx)
+
+  $result = New-Object System.Collections.Generic.List[string]
+  $candidates = @(
+    ($DeployBinRel + '/' + ($Ctx.DllPrefix + '_FinalRelease.dll')),
+    ($DeployPluginRel + '/' + $PluginDll)
+  )
+  foreach ($rel in $candidates) {
+    $full = Join-Path $Ctx.Out ($rel -replace '/', '\')
+    if (Test-Path -LiteralPath $full -PathType Leaf) {
+      $result.Add($rel)
+    }
+  }
+  return $result
+}
+
+function Remove-DllIntermediate {
+  param([string]$BuildDir, [string]$ProjectDir)
+
+  if ([string]::IsNullOrWhiteSpace($BuildDir)) {
+    throw "Refusing to clean: the DLL build directory is empty."
+  }
+  if (Test-PathEqual $BuildDir $ProjectDir) {
+    throw "Refusing to clean the project directory: $BuildDir"
+  }
+  if (-not (Test-PathUnder $BuildDir $ProjectDir)) {
+    throw "Refusing to clean outside the project directory: $BuildDir"
+  }
+  if (Test-Path -LiteralPath (Join-Path $BuildDir 'CMakeLists.txt') -PathType Leaf) {
+    throw "Refusing to clean '$BuildDir': it looks like a source directory (contains CMakeLists.txt)."
+  }
+  if (Test-Path -LiteralPath $BuildDir) {
+    Remove-Item -LiteralPath $BuildDir -Recurse -Force -ErrorAction Stop
+  }
 }
 
 function Read-ArtXmlInfo {
@@ -666,9 +995,22 @@ function Main {
 
   if ($ctx.Clean) {
     Invoke-Clean -Out $ctx.Out -ProjectDir $ctx.ProjectDir -DefaultOut $ctx.DefaultOut
+    Remove-DllIntermediate -BuildDir $ctx.DllBuildDir -ProjectDir $ctx.ProjectDir
   }
 
   $copyResult = Copy-ContentFiles -ContentList $project.Content -ProjectDir $ctx.ProjectDir -Out $ctx.Out -SkipArt $ctx.SkipArt
+
+  $dllFiles = @()
+  if (-not $ctx.SkipDll) {
+    Invoke-DllBuild -CMake $ctx.CMake -DllDir $ctx.DllDir -BuildDir $ctx.DllBuildDir -Config $ctx.DllConfig -Generator $ctx.DllGenerator
+    $dllFiles = @(Copy-DllArtifacts -Ctx $ctx)
+  }
+  else {
+    $dllFiles = @(Get-DeployedDllFiles -Ctx $ctx)
+    if ($dllFiles.Count -lt 2) {
+      throw "Option '--skip-dll' was given, but the expected loader and plugin DLLs were not found in '$($ctx.Out)'. Build once without '--skip-dll' first."
+    }
+  }
 
   $cooks = 0
   if ($willCook) {
@@ -676,9 +1018,16 @@ function Main {
   }
 
   $depRel = Resolve-DepPath -Out $ctx.Out -ProjectDir $ctx.ProjectDir
-  $modInfoPath = New-ModInfo -Ctx $ctx -Project $project -DepRelativePath $depRel -CopiedFiles $copyResult.Files
+  $allFiles = @($copyResult.Files) + @($dllFiles)
+  $modInfoPath = New-ModInfo -Ctx $ctx -Project $project -DepRelativePath $depRel -CopiedFiles $allFiles
 
   Write-Host ("Copied {0} content file(s)." -f $copyResult.Count)
+  if ($ctx.SkipDll) {
+    Write-Host ("Reused {0} existing DLL file(s)." -f $dllFiles.Count)
+  }
+  else {
+    Write-Host ("Deployed {0} DLL file(s)." -f $dllFiles.Count)
+  }
   Write-Host ("Ran {0} asset cook(s)." -f $cooks)
   Write-Host ("Wrote {0}" -f $modInfoPath)
   return 0
