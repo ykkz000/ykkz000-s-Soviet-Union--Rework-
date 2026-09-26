@@ -140,17 +140,17 @@
       <Text>约瑟夫·斯大林，敌人的獠牙已显露，带领苏联，将敌人尽数击退，以一代人的斗争，决定未来苏联的国际地位吧！</Text>
     </Row>
     <!--Diplomacy-->
-    <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_VLADIMIR_LENIN_DECLARE_WAR" Language="zh_Hans_CN">
-      <Text>你有考虑过人民的感受吗？</Text>
+    <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_VLADIMIR_LENIN_PEACEFUL" Language="zh_Hans_CN">
+      <Text>苏联人民赞赏你对和平的维护。</Text>
     </Row>
-    <Row Tag="LOC_DIPLO_WARNING_LEADER_YKKZ000_VLADIMIR_LENIN_DECLARE_WAR" Language="zh_Hans_CN">
-      <Text>（你引发了战争）</Text>
+    <Row Tag="LOC_DIPLO_KUDO_LEADER_YKKZ000_VLADIMIR_LENIN_PEACEFUL" Language="zh_Hans_CN">
+      <Text>（你与所有主要文明和平相处）</Text>
     </Row>
-    <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_VLADIMIR_LENIN_SAME_GOVERNMENT" Language="zh_Hans_CN">
-      <Text>苏联人民认为你是革命的同志。</Text>
+    <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_VLADIMIR_LENIN_AT_WAR" Language="zh_Hans_CN">
+      <Text>战争只会带来苦难，停止它吧。</Text>
     </Row>
-    <Row Tag="LOC_DIPLO_KUDO_LEADER_YKKZ000_VLADIMIR_LENIN_SAME_GOVERNMENT" Language="zh_Hans_CN">
-      <Text>（你拥有相同的政体）</Text>
+    <Row Tag="LOC_DIPLO_WARNING_LEADER_YKKZ000_VLADIMIR_LENIN_AT_WAR" Language="zh_Hans_CN">
+      <Text>（你正在与他国交战）</Text>
     </Row>
     <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_JOSEPH_STALIN_HIGH_COMBAT" Language="zh_Hans_CN">
       <Text>你应该听我的，而不是准备这么多军队。</Text>
@@ -158,11 +158,11 @@
     <Row Tag="LOC_DIPLO_WARNING_LEADER_YKKZ000_JOSEPH_STALIN_HIGH_COMBAT" Language="zh_Hans_CN">
       <Text>（你拥有大量的军队）</Text>
     </Row>
-    <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_JOSEPH_STALIN_SAME_GOVERNMENT" Language="zh_Hans_CN">
-      <Text>苏联人民认为你是革命的同志。</Text>
+    <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_JOSEPH_STALIN_LOW_COMBAT" Language="zh_Hans_CN">
+      <Text>很好，你没有把资源浪费在军队上。</Text>
     </Row>
-    <Row Tag="LOC_DIPLO_KUDO_LEADER_YKKZ000_JOSEPH_STALIN_SAME_GOVERNMENT" Language="zh_Hans_CN">
-      <Text>（你拥有相同的政体）</Text>
+    <Row Tag="LOC_DIPLO_KUDO_LEADER_YKKZ000_JOSEPH_STALIN_LOW_COMBAT" Language="zh_Hans_CN">
+      <Text>（你的军队规模较小）</Text>
     </Row>
     <!--FIRST MEET-->
     <!--First AI line-->

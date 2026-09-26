@@ -26,13 +26,13 @@
       <Text>国际主义</Text>
     </Row>
     <Row Tag="LOC_AGENDA_YKKZ000_INTERNATIONALISM_DESCRIPTION" Language="zh_Hans_CN">
-      <Text>喜欢相同政体的文明，讨厌宣战的文明。</Text>
+      <Text>喜欢和平的文明，讨厌处于战争的文明。</Text>
     </Row>
     <Row Tag="LOC_AGENDA_YKKZ000_SOCIAL_CHAUVINISM_NAME" Language="zh_Hans_CN">
       <Text>社会沙文主义</Text>
     </Row>
     <Row Tag="LOC_AGENDA_YKKZ000_SOCIAL_CHAUVINISM_DESCRIPTION" Language="zh_Hans_CN">
-      <Text>喜欢相同政体的文明，讨厌拥有较多地面单位的文明。</Text>
+      <Text>喜欢低战斗力的文明，讨厌高战斗力的文明。</Text>
     </Row>
     <!-- Traits -->
     <Row Tag="LOC_TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK_NAME" Language="zh_Hans_CN">

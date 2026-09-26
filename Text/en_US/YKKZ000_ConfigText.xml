@@ -26,13 +26,13 @@
       <Text>International</Text>
     </Row>
     <Row Tag="LOC_AGENDA_YKKZ000_INTERNATIONALISM_DESCRIPTION">
-      <Text>Likes civilizations that have the same government and hates civilizations that declare war.</Text>
+      <Text>Likes civilizations that are at peace and hates civilizations that are at war.</Text>
     </Row>
     <Row Tag="LOC_AGENDA_YKKZ000_SOCIAL_CHAUVINISM_NAME">
       <Text>Social Chauvinism</Text>
     </Row>
     <Row Tag="LOC_AGENDA_YKKZ000_SOCIAL_CHAUVINISM_DESCRIPTION">
-      <Text>Likes civilizations that have the same government and hates civilizations that have many standing units.</Text>
+      <Text>Likes civilizations with low combat strength and hates civilizations with high combat strength.</Text>
     </Row>
     <!-- Traits -->
     <Row Tag="LOC_TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK_NAME">

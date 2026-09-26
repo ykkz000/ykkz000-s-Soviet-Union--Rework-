@@ -140,17 +140,17 @@
       <Text>Joseph Stalin, the enemy’s fangs have been bared. Lead the Soviet Union to repel the enemy entirely, and let the struggle of a generation determine the future international standing of the Soviet Union!</Text>
     </Row>
     <!--Diplomacy-->
-    <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_VLADIMIR_LENIN_DECLARE_WAR">
-      <Text>Have you taken into account the feelings of the people?</Text>
+    <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_VLADIMIR_LENIN_PEACEFUL">
+      <Text>The Soviet people appreciate your commitment to peace.</Text>
     </Row>
-    <Row Tag="LOC_DIPLO_WARNING_LEADER_YKKZ000_VLADIMIR_LENIN_DECLARE_WAR">
-      <Text>(You declare wars)</Text>
+    <Row Tag="LOC_DIPLO_KUDO_LEADER_YKKZ000_VLADIMIR_LENIN_PEACEFUL">
+      <Text>(You are at peace with all major civilizations)</Text>
     </Row>
-    <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_VLADIMIR_LENIN_SAME_GOVERNMENT">
-      <Text>The Soviet people consider you a comrade of the revolution.</Text>
+    <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_VLADIMIR_LENIN_AT_WAR">
+      <Text>War only brings suffering; put an end to it.</Text>
     </Row>
-    <Row Tag="LOC_DIPLO_KUDO_LEADER_YKKZ000_VLADIMIR_LENIN_SAME_GOVERNMENT">
-      <Text>(You have the same government)</Text>
+    <Row Tag="LOC_DIPLO_WARNING_LEADER_YKKZ000_VLADIMIR_LENIN_AT_WAR">
+      <Text>(You are at war)</Text>
     </Row>
     <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_JOSEPH_STALIN_HIGH_COMBAT">
       <Text>You should have listened to me instead of preparing so many troops.</Text>
@@ -158,11 +158,11 @@
     <Row Tag="LOC_DIPLO_WARNING_LEADER_YKKZ000_JOSEPH_STALIN_HIGH_COMBAT">
       <Text>(You have many combat units.)</Text>
     </Row>
-    <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_VLADIMIR_LENIN_SAME_GOVERNMENT">
-      <Text>The Soviet people consider you a comrade of the revolution.</Text>
+    <Row Tag="LOC_DIPLO_MODIFIER_LEADER_YKKZ000_JOSEPH_STALIN_LOW_COMBAT">
+      <Text>Good, you have not wasted resources on the military.</Text>
     </Row>
-    <Row Tag="LOC_DIPLO_KUDO_LEADER_YKKZ000_VLADIMIR_LENIN_SAME_GOVERNMENT">
-      <Text>(You have the same government)</Text>
+    <Row Tag="LOC_DIPLO_KUDO_LEADER_YKKZ000_JOSEPH_STALIN_LOW_COMBAT">
+      <Text>(You have a small standing army)</Text>
     </Row>
     <!--FIRST MEET-->
     <!--First AI line-->
