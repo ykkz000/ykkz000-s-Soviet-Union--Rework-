@@ -18,22 +18,20 @@ function TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_KILL(iKilledPlayerI
         return;
     end
     local pUnit = UnitManager.GetUnit(iPlayerID, iUnitID);
-    if (pUnit == nil) then
-        return;
+    if (pUnit ~= nil) then
+        local pUnitInfo = GameInfo.Units[pUnit:GetType()];
+        if (pUnitInfo ~= nil and pUnitInfo.PromotionClass == 'PROMOTION_CLASS_MELEE') then
+            UnitManager.RestoreUnitAttacks(pUnit);
+            UnitManager.RestoreMovementToFormation(pUnit);
+        end
     end
-    local pUnitInfo = GameInfo.Units[pUnit:GetType()];
-    if (pUnitInfo == nil or pUnitInfo.PromotionClass ~= 'PROMOTION_CLASS_MELEE') then
-        return;
-    end
-    UnitManager.RestoreUnitAttacks(pUnit);
-    UnitManager.RestoreMovementToFormation(pUnit);
-    -- Melee units: every 3 kills grants the owning player 1 free envoy; the kill count is stored on the unit.
-    local iKills = (pUnit:GetProperty('PROPERTY_YKKZ000_STALIN_KILL_COUNT') or 0) + 1;
+    -- Player-wide: every 3 kills grants 1 free envoy; the kill count is stored on the player.
+    local iKills = (pPlayer:GetProperty('PROPERTY_YKKZ000_STALIN_KILL_COUNT') or 0) + 1;
     if (iKills >= 3) then
         iKills = iKills - 3;
         pPlayer:AttachModifierByID('YKKZ000_STALIN_ENVOY_REWARD');
     end
-    pUnit:SetProperty('PROPERTY_YKKZ000_STALIN_KILL_COUNT', iKills);
+    pPlayer:SetProperty('PROPERTY_YKKZ000_STALIN_KILL_COUNT', iKills);
 end
 
 Events.UnitKilledInCombat.Add(TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_KILL);

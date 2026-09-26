@@ -57,7 +57,7 @@
       <Text>Grand Depth Operational Theory</Text>
     </Row>
     <Row Tag="LOC_TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_DESC">
-      <Text>Melee unit restore [ICON_Movement] Movement and attacks after killing. All melee units +1 [ICON_Movement] and +5 [ICON_Strength] Combat Strength. Melee units gain 1 Envoy after every 3 kills. All units +1 [ICON_Strength] Combat Strength for each city-state you are Suzerain of.</Text>
+      <Text>Melee unit restore [ICON_Movement] Movement and attacks after killing. All melee units +1 [ICON_Movement] and +5 [ICON_Strength] Combat Strength. Gain 1 Envoy after every 3 kills. All units +1 [ICON_Strength] Combat Strength for each city-state you are Suzerain of.</Text>
     </Row>
     <!-- Districts -->
     <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_NAME">
