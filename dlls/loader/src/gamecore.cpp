@@ -1,5 +1,7 @@
 #include <windows.h>
 
+#include <shlobj.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -38,6 +40,7 @@ struct BuildProfile {
   std::ptrdiff_t rvaEffectApply;
   std::ptrdiff_t rvaEffectRemove;
   std::ptrdiff_t rvaChangeYieldModifier;
+  std::ptrdiff_t rvaChangePopulation;
 };
 
 constexpr BuildProfile kKnownXp2Build{
@@ -49,14 +52,7 @@ constexpr BuildProfile kKnownXp2Build{
     0x833930,   // Effects::AdjustCityYieldModifier::Apply
     0x8343A0,   // Effects::AdjustCityYieldModifier::Remove
     0x131E60,   // City::Instance::ChangeYieldModifier(YieldTypes, int)
-};
-
-// —— 候选路径（相对 loader 所在目录）：仅接受同目录被重命名的原版 XP2，
-//    或未被替换的同目录 XP2；不再回退到 XP1/Base，避免跨版本误用偏移。
-constexpr const wchar_t* kCandidatePaths[] = {
-    L"GameCore_XP2_FinalRelease_orig.dll",
-    L"GameCore_XP2_FinalRelease_orig.dll.bak",
-    L"GameCore_XP2_FinalRelease.dll",
+    0x131CF0,   // City::Instance::ChangePopulation(int delta)
 };
 
 GameCoreApi g_api;
@@ -123,13 +119,20 @@ const std::uint8_t* findString(HMODULE module, const char* text) {
 }
 
 bool resolveApi(HMODULE module, GameCoreApi& out) {
+  LogScope scope("resolve GameCore entry points");
   const auto* nt = ntHeaders(module);
   if (nt == nullptr) {
     return false;
   }
   if (nt->FileHeader.TimeDateStamp != kKnownXp2Build.timeDateStamp ||
       nt->OptionalHeader.SizeOfImage != kKnownXp2Build.sizeOfImage) {
-    logMessage(1, "GameCore 构建指纹不匹配，拒绝使用固定偏移");
+    char detail[256] = {};
+    _snprintf_s(detail, sizeof(detail), _TRUNCATE,
+                "GameCore build fingerprint mismatch: TimeDateStamp=0x%08X "
+                "(expected 0x%08X) SizeOfImage=0x%X (expected 0x%X)",
+                nt->FileHeader.TimeDateStamp, kKnownXp2Build.timeDateStamp,
+                nt->OptionalHeader.SizeOfImage, kKnownXp2Build.sizeOfImage);
+    logMessage(1, detail);
     return false;
   }
 
@@ -177,7 +180,10 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   resolved.effectApply = computeRva(kKnownXp2Build.rvaEffectApply);
   resolved.effectRemove = computeRva(kKnownXp2Build.rvaEffectRemove);
   resolved.changeYieldModifier = computeRva(kKnownXp2Build.rvaChangeYieldModifier);
+  resolved.changePopulation = computeRva(kKnownXp2Build.rvaChangePopulation);
   resolved.module = module;
+  // changePopulation 不列入致命检查：缺失时 installPopulationHook() 会退化为
+  // 建立时人口快照，而不是让整个 Loader 无法初始化。
   if (resolved.getEffectRegistry == nullptr || resolved.mallocTemp == nullptr ||
       resolved.reserveVector == nullptr || resolved.effectApply == nullptr ||
       resolved.effectRemove == nullptr || resolved.changeYieldModifier == nullptr) {
@@ -188,17 +194,47 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   return true;
 }
 
-HMODULE tryLoadCandidate(const std::wstring& directory, const wchar_t* relative) {
-  std::wstring full = directory + L"\\" + relative;
-  if (GetFileAttributesW(full.c_str()) == INVALID_FILE_ATTRIBUTES) {
+std::wstring parentDirectory(const std::wstring& path) {
+  const std::size_t slash = path.find_last_of(L"\\/");
+  return slash == std::wstring::npos ? std::wstring{} : path.substr(0, slash);
+}
+
+std::wstring hostExecutableDirectory() {
+  wchar_t buffer[MAX_PATH] = {};
+  const DWORD length = GetModuleFileNameW(GetModuleHandleW(nullptr), buffer, MAX_PATH);
+  if (length == 0 || length >= MAX_PATH) {
+    return {};
+  }
+  return parentDirectory(std::wstring(buffer, length));
+}
+
+std::vector<std::wstring> candidatePaths(const std::wstring& loaderDirectory) {
+  std::vector<std::wstring> paths;
+  // 1) 就地替换部署：loader 同目录下被重命名的原版
+  if (!loaderDirectory.empty()) {
+    paths.push_back(loaderDirectory + L"\\GameCore_XP2_FinalRelease_orig.dll");
+    paths.push_back(loaderDirectory + L"\\GameCore_XP2_FinalRelease_orig.dll.bak");
+    paths.push_back(loaderDirectory + L"\\GameCore_XP2_FinalRelease.dll");
+  }
+  // 2) 模组目录部署：宿主 EXE（<root>\Base\Binaries\Win64*）上溯游戏根，定位 DLC/Expansion2
+  std::wstring directory = hostExecutableDirectory();
+  for (int up = 0; up < 5 && !directory.empty(); ++up) {
+    paths.push_back(directory +
+                    L"\\DLC\\Expansion2\\Binaries\\Win64\\GameCore_XP2_FinalRelease.dll");
+    directory = parentDirectory(directory);
+  }
+  return paths;
+}
+
+HMODULE tryLoadPath(const std::wstring& full) {
+  if (full.empty() || GetFileAttributesW(full.c_str()) == INVALID_FILE_ATTRIBUTES) {
     return nullptr;
   }
   HMODULE module = LoadLibraryExW(full.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
-  if (module == nullptr) {
-    return nullptr;
-  }
-  if (module == g_selfModule) {
-    FreeLibrary(module);
+  if (module == nullptr || module == g_selfModule) {
+    if (module != nullptr) {
+      FreeLibrary(module);
+    }
     return nullptr;
   }
   return module;
@@ -217,6 +253,42 @@ std::wstring moduleDirectory() {
   return slash == std::wstring::npos ? std::wstring{} : path.substr(0, slash);
 }
 
+namespace {
+
+std::wstring gameLogDirectory() {
+  // 优先 Known Folder API；失败退回环境变量。
+  std::wstring local;
+  PWSTR wide = nullptr;
+  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, KF_FLAG_DEFAULT, nullptr, &wide))) {
+    local.assign(wide);
+    CoTaskMemFree(wide);
+  } else {
+    wchar_t buffer[MAX_PATH] = {};
+    const DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", buffer, MAX_PATH);
+    if (length > 0 && length < MAX_PATH) {
+      local.assign(buffer, length);
+    }
+  }
+  if (local.empty()) {
+    return {};
+  }
+  const std::wstring dir =
+      local + L"\\Firaxis Games\\Sid Meier's Civilization VI\\Logs";
+  CreateDirectoryW(dir.c_str(), nullptr); // 目录通常已存在；失败也不致命
+  return dir;
+}
+
+std::wstring logFilePath() {
+  const std::wstring dir = gameLogDirectory();
+  if (!dir.empty()) {
+    return dir + L"\\YKKZ000_loader.log";
+  }
+  const std::wstring fallback = moduleDirectory(); // 兜底：Loader 目录
+  return fallback.empty() ? std::wstring{} : fallback + L"\\YKKZ000_loader.log";
+}
+
+} // namespace
+
 std::uint32_t makeHash(const char* text) {
   return bridge::makeHash(text);
 }
@@ -226,40 +298,97 @@ void logMessage(int level, const char* message) {
     return;
   }
   char buffer[1024] = {};
-  const int written = _snprintf_s(buffer, sizeof(buffer), _TRUNCATE,
-                                  "[YKKZ000:%d] %s\n", level, message);
-  if (written != 0) {
-    OutputDebugStringA(buffer);
+  _snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "[YKKZ000:%d] %s\n", level, message);
+  const std::size_t length = std::strlen(buffer);
+  if (length == 0) {
+    return;
   }
+  OutputDebugStringA(buffer);
+
+  static std::mutex s_logMutex;
+  std::lock_guard<std::mutex> guard(s_logMutex);
+  static const std::wstring s_logPath = logFilePath(); // 进程内只解析一次
+  if (s_logPath.empty()) {
+    return;
+  }
+  HANDLE file = CreateFileW(s_logPath.c_str(), FILE_APPEND_DATA, FILE_SHARE_READ, nullptr,
+                            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (file == INVALID_HANDLE_VALUE) {
+    return;
+  }
+  DWORD written = 0;
+  WriteFile(file, buffer, static_cast<DWORD>(length), &written, nullptr);
+  CloseHandle(file);
+}
+
+void logMessage(int level, const std::wstring& message) {
+  if (message.empty()) {
+    return;
+  }
+  const int bytes = WideCharToMultiByte(CP_UTF8, 0, message.c_str(),
+                                        static_cast<int>(message.size()),
+                                        nullptr, 0, nullptr, nullptr);
+  if (bytes <= 0) {
+    return;
+  }
+  std::string utf8(static_cast<std::size_t>(bytes), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, message.c_str(), static_cast<int>(message.size()),
+                      utf8.data(), bytes, nullptr, nullptr);
+  logMessage(level, utf8.c_str());
 }
 
 bool ensureGameCoreLoaded() {
   std::lock_guard<std::mutex> guard(g_loadMutex);
+  LogScope scope("locate real GameCore");
   if (g_api.module != nullptr) {
     return true;
   }
-
   const std::wstring directory = moduleDirectory();
   if (directory.empty()) {
-    logMessage(0, "无法确定 loader 所在目录");
+    logMessage(0, "Unable to determine the loader directory");
     return false;
   }
+  logMessage(1, L"Loader directory: " + directory);
 
-  for (const wchar_t* relative : kCandidatePaths) {
-    HMODULE module = tryLoadCandidate(directory, relative);
+  const std::vector<std::wstring> candidates = candidatePaths(directory);
+  logMessage(1, L"Real GameCore candidate path count: " + std::to_wstring(candidates.size()));
+  for (const std::wstring& path : candidates) {
+    if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+      logMessage(2, L"Candidate does not exist: " + path);
+      continue;
+    }
+    logMessage(1, L"Trying candidate GameCore: " + path);
+    HMODULE module = tryLoadPath(path);
     if (module == nullptr) {
+      logMessage(1, L"Candidate load failed: " + path);
       continue;
     }
     GameCoreApi resolved;
     if (resolveApi(module, resolved)) {
       g_api = resolved;
+      logMessage(1, L"Loaded real GameCore: " + path);
       return true;
     }
-    logMessage(1, "已加载候选 GameCore，但特征扫描失败，继续尝试其它路径");
-    FreeLibrary(module); // g_api 未被写入，不存在悬空指针
+    logMessage(1, L"Candidate fingerprint/signature mismatch: " + path);
+    FreeLibrary(module);
   }
 
-  logMessage(0, "未能定位真实 GameCore 或其内部入口");
+  // 兜底：交由游戏 DLL 搜索路径解析标准名
+  HMODULE module = LoadLibraryW(L"GameCore_XP2_FinalRelease.dll");
+  if (module != nullptr && module != g_selfModule) {
+    wchar_t buffer[MAX_PATH] = {};
+    GetModuleFileNameW(module, buffer, MAX_PATH);
+    GameCoreApi resolved;
+    if (resolveApi(module, resolved)) {
+      g_api = resolved;
+      logMessage(1, std::wstring(L"Loaded real GameCore via DLL search path: ") + buffer);
+      return true;
+    }
+    FreeLibrary(module);
+  } else if (module == g_selfModule && module != nullptr) {
+    FreeLibrary(module);
+  }
+  logMessage(0, "Failed to locate the real GameCore");
   return false;
 }
 

@@ -1,6 +1,7 @@
 #include <windows.h>
 
 #include <cstddef>
+#include <cstdio>
 #include <string>
 #include <vector>
 
@@ -59,11 +60,19 @@ bool isSelfOrGameCore(HMODULE module) {
 }
 
 void tryLoadPlugin(const std::wstring& file, bridge::Host* host) {
+  LogScope scope("load plugin");
+  logMessage(2, L"Trying plugin DLL: " + file);
   HMODULE module = LoadLibraryW(file.c_str());
-  if (module == nullptr || isSelfOrGameCore(module)) {
-    if (module != nullptr) {
-      FreeLibrary(module);
-    }
+  if (module == nullptr) {
+    const DWORD error = GetLastError();
+    wchar_t detail[512] = {};
+    _snwprintf_s(detail, _countof(detail), _TRUNCATE,
+                 L"Plugin LoadLibrary failed (GetLastError=%lu): %s", error, file.c_str());
+    logMessage(1, detail);
+    return;
+  }
+  if (isSelfOrGameCore(module)) {
+    FreeLibrary(module); // 自身或 GameCore，静默跳过
     return;
   }
 
@@ -71,8 +80,8 @@ void tryLoadPlugin(const std::wstring& file, bridge::Host* host) {
       GetProcAddress(module, YKKZ000_PLUGIN_EXPORT_GETPLUGIN));
   auto* destroy = reinterpret_cast<bridge::DestroyPluginFn>(
       GetProcAddress(module, YKKZ000_PLUGIN_EXPORT_DESTROY));
-
   if (getPlugin == nullptr) {
+    logMessage(1, L"Skipped: GetPlugin not exported: " + file);
     FreeLibrary(module);
     return;
   }
@@ -83,21 +92,28 @@ void tryLoadPlugin(const std::wstring& file, bridge::Host* host) {
       destroy();
     }
     FreeLibrary(module);
-    logMessage(1, "插件 GetPlugin 返回失败，已卸载");
+    wchar_t detail[512] = {};
+    _snwprintf_s(detail, _countof(detail), _TRUNCATE,
+                 L"Plugin init failed: GetPlugin returned %d; unloaded: %s", result,
+                 file.c_str());
+    logMessage(1, detail);
     return;
   }
 
   g_plugins.push_back(LoadedPlugin{module, destroy});
-  logMessage(1, "已加载插件");
+  logMessage(1, L"Plugin loaded: " + file);
 }
 
 void scanDirectory(const std::wstring& directory, bridge::Host* host) {
+  LogScope scope("scan plugin directory");
   WIN32_FIND_DATAW data = {};
   const std::wstring pattern = directory + L"\\*.dll";
   HANDLE find = FindFirstFileW(pattern.c_str(), &data);
   if (find == INVALID_HANDLE_VALUE) {
+    logMessage(2, L"Plugin directory missing or has no readable DLL: " + directory);
     return;
   }
+  logMessage(1, L"Scanning plugin directory: " + directory);
   do {
     if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
       continue;
@@ -113,13 +129,18 @@ void loadPlugins(bridge::Host* host) {
   if (host == nullptr || g_pluginsLoaded) {
     return;
   }
+  LogScope scope("load plugins (core)");
   g_pluginsLoaded = true;
-  for (const std::wstring& directory : pluginSearchDirs()) {
+  const std::vector<std::wstring> directories = pluginSearchDirs();
+  logMessage(1, L"Plugin search directory count: " + std::to_wstring(directories.size()));
+  for (const std::wstring& directory : directories) {
     scanDirectory(directory, host);
   }
+  logMessage(1, L"Plugin loading finished; loaded count: " + std::to_wstring(g_plugins.size()));
 }
 
 void unloadPlugins() {
+  LogScope scope("unload plugins");
   for (auto it = g_plugins.rbegin(); it != g_plugins.rend(); ++it) {
     if (it->destroy != nullptr) {
       it->destroy();

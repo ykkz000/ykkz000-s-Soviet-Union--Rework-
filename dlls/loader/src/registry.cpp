@@ -51,18 +51,19 @@ void* findTemplateFactory(void* vector, std::uint32_t templateHash) {
 } // namespace
 
 int registerEffectType(const bridge::EffectDesc* desc) {
+  LogScope scope("register effect type");
   if (desc == nullptr || desc->typeName == nullptr || desc->templateEffect == nullptr) {
-    logMessage(0, "registerEffectType: 参数无效");
+    logMessage(0, "registerEffectType: invalid argument");
     return -1;
   }
 
   if (!ensureGameCoreLoaded()) {
-    logMessage(0, "registerEffectType: 真实 GameCore 不可用");
+    logMessage(0, "registerEffectType: real GameCore unavailable");
     return -2;
   }
   const GameCoreApi& api = gameCore();
   if (api.getEffectRegistry == nullptr || api.mallocTemp == nullptr) {
-    logMessage(0, "registerEffectType: GameCore 入口缺失");
+    logMessage(0, "registerEffectType: GameCore entry points missing");
     return -2;
   }
 
@@ -78,13 +79,13 @@ int registerEffectType(const bridge::EffectDesc* desc) {
   void* vector = getRegistry();
   void* templateFactory = findTemplateFactory(vector, templateHash);
   if (templateFactory == nullptr) {
-    logMessage(0, "registerEffectType: 找不到模板效果工厂");
+    logMessage(0, "registerEffectType: template effect factory not found");
     return -3;
   }
 
   void* vtable = cloneFactoryVTable(templateFactory);
   if (vtable == nullptr) {
-    logMessage(0, "registerEffectType: 克隆工厂 vtable 失败");
+    logMessage(0, "registerEffectType: failed to clone factory vtable");
     return -4;
   }
 
@@ -92,18 +93,23 @@ int registerEffectType(const bridge::EffectDesc* desc) {
   // 以便在入口内部复用引擎的参数解析。
   if (desc->behavior != bridge::EffectBehavior::kInherit) {
     if (desc->behavior != bridge::EffectBehavior::kCityYieldModifierPerPopulation) {
-      logMessage(0, "registerEffectType: 未知的自定义效果行为");
+      logMessage(0, "registerEffectType: unknown custom effect behavior");
       return -8;
     }
     auto* templateVtable = *reinterpret_cast<void***>(templateFactory);
     void* templateCreate =
         templateVtable != nullptr ? templateVtable[kFactoryCreateSlot] : nullptr;
     if (templateCreate == nullptr) {
-      logMessage(0, "registerEffectType: 模板工厂缺少 Create 槽");
+      logMessage(0, "registerEffectType: template factory is missing the Create slot");
       return -8;
     }
     static_cast<void**>(vtable)[kFactoryCreateSlot] = customFactoryCreateEntry();
     registerEffectBehavior(typeHash, desc->behavior, templateCreate);
+    if (desc->behavior == bridge::EffectBehavior::kCityYieldModifierPerPopulation &&
+        !installPopulationHook()) {
+      logMessage(1, "Per-population effect: population hook not installed; modifier will "
+                     "use the founding-time population snapshot");
+    }
   }
 
   rememberTypeName(typeHash, desc->typeName);
@@ -111,7 +117,7 @@ int registerEffectType(const bridge::EffectDesc* desc) {
   auto* factory = reinterpret_cast<MallocTempFn>(api.mallocTemp)(
       kFactoryObjectSize, "ykkz000_loader", 0, 0, 0);
   if (factory == nullptr) {
-    logMessage(0, "registerEffectType: 分配工厂对象失败");
+    logMessage(0, "registerEffectType: failed to allocate factory object");
     return -5;
   }
   *reinterpret_cast<void**>(factory) = vtable;
@@ -120,7 +126,7 @@ int registerEffectType(const bridge::EffectDesc* desc) {
 
   if (readPointer(vector, kVectorEndOffset) == readPointer(vector, kVectorCapacityOffset)) {
     if (api.reserveVector == nullptr) {
-      logMessage(0, "registerEffectType: 注册表已满且无扩容入口");
+      logMessage(0, "registerEffectType: registry full and no reserve entry");
       return -6;
     }
     reinterpret_cast<ReserveVectorFn>(api.reserveVector)(vector, 1);
@@ -128,7 +134,7 @@ int registerEffectType(const bridge::EffectDesc* desc) {
 
   auto* end = static_cast<std::uint8_t*>(readPointer(vector, kVectorEndOffset));
   if (end == nullptr) {
-    logMessage(0, "registerEffectType: 注册表游标为空");
+    logMessage(0, "registerEffectType: registry cursor is null");
     return -7;
   }
   *reinterpret_cast<void**>(end) = factory;
