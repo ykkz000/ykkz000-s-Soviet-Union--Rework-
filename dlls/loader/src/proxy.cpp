@@ -21,6 +21,7 @@ TelemetryHashFn g_realTelemetryHash = nullptr;
 bridge::Host g_host = {};
 
 bool initialize() {
+  installCrashCapture();  // 尽早安装，保证之后任何崩溃都能记录
   LogScope scope("initialize");
   {
     LogScope s("resolve real GameCore");
@@ -44,6 +45,11 @@ bool initialize() {
     logMessage(0, "Initialization failed: could not resolve real DllCreateGameContext");
     return false;
   }
+
+  // 效果 handler 注册：必须在真实 DllCreateGameContext 之前安装 hook，才能捕获
+  // 游戏上下文构造期间建立的内建 handler 表并补登自定义效果。
+  const bool handlerHookReady = installEffectHandlerHook();
+  logMessageF(1, "effect handler hook ready=%d", handlerHookReady ? 1 : 0);
 
   {
     LogScope s("build host interface");
@@ -80,6 +86,7 @@ void* createGameContext() {
   initializeLoaderOnce();
   // 注册只发生一次，而 destroyGameContext 会停用 hook；按已注册行为重新启用。
   installPopulationHookIfNeeded();
+  (void)installEffectHandlerHook();
   if (g_realCreate == nullptr) {
     return nullptr;
   }
@@ -89,11 +96,15 @@ void* createGameContext() {
 
 void destroyGameContext(void* context) {
   LogScope scope("destroy game context");
+  // 必须在真实 destroy 之前：此时 handler root 仍有效，可安全摘掉我们登记的节点，
+  // 否则引擎关停阶段会调用到不成立的 handler 而崩溃（见退出崩溃分析）。
+  removeCustomEffectHandlers();
   if (g_realDestroy != nullptr) {
     LogScope call("call real DllDestroyGameContext");
     g_realDestroy(context);
   }
   uninstallPopulationHook();
+  uninstallEffectHandlerHook();
   unloadPlugins();
 }
 

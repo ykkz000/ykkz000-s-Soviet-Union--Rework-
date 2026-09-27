@@ -1,6 +1,20 @@
 cmake_minimum_required(VERSION 3.21)
 project(YKKZ000Dlls LANGUAGES CXX)
 
+# 诊断用二分开关（默认关闭，仅用于定位崩溃归属）：
+# - 关闭自定义行为路径（注册时退化为 kInherit）
+# - 禁用 ChangePopulation hook
+option(YKKZ000_DISABLE_CUSTOM_BEHAVIOR
+  "注册效果时改用 kInherit（禁用自定义效果路径）" OFF)
+option(YKKZ000_DISABLE_POPULATION_HOOK
+  "禁用 ChangePopulation hook" OFF)
+option(YKKZ000_DISABLE_EFFECT_HANDLER
+  "禁用效果 handler 注册（内建 handler 表 hook）" OFF)
+option(YKKZ000_DISABLE_HANDLER_GUARD
+  "禁用 handler 派发守卫（仅供对照复现崩溃）" OFF)
+option(YKKZ000_ENABLE_DISPATCH_TRACE
+  "启用 0x979290 通用派发 trace hook（诊断用，默认关）" OFF)
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

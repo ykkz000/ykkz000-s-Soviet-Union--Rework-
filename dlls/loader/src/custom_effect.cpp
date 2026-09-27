@@ -1,5 +1,6 @@
 #include <windows.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -85,7 +86,9 @@ bool readEffectEntries(void* self, std::vector<AppliedEntry>& out) {
   const int amountCount = readField<int>(self, kEffectAmountCountOffset);
   const int* const yields = readField<const int*>(self, kEffectYieldTypeArrayOffset);
   const int* const amounts = readField<const int*>(self, kEffectAmountArrayOffset);
-  if (entryCount <= 0 || yields == nullptr || amounts == nullptr) {
+  if (entryCount <= 0 || entryCount > kMaxEffectEntries ||
+      amountCount <= 0 || amountCount > kMaxEffectEntries ||
+      yields == nullptr || amounts == nullptr) {
     return false;
   }
   const int count = entryCount < amountCount ? entryCount : amountCount;
@@ -111,6 +114,18 @@ int applyPerPopulation(void* self, void* city, int sign) {
   }
   const auto change = reinterpret_cast<ChangeYieldModifierFn>(api.changeYieldModifier);
   const int population = readField<int>(city, kCityPopulationOffset);
+  if (population < 0 || population > kMaxPlausiblePopulation) {
+    logMessageF(0, "run: implausible population %d (city=%p); skipping write", population, city);
+    return 0;
+  }
+  static std::atomic<bool> s_loggedFirstApply{false};
+  if (!s_loggedFirstApply.exchange(true)) {
+    logMessageF(1, "apply: first call self=%p city=%p pop=%d entries=%zu", self, city, population,
+                entries.size());
+    for (const AppliedEntry& entry : entries) {
+      logMessageF(2, "apply: entry yield=%d amount=%d", entry.yieldType, entry.amount);
+    }
+  }
   for (const AppliedEntry& entry : entries) {
     if (sign > 0) {
       change(city, entry.yieldType, entry.amount * population);
@@ -188,6 +203,11 @@ void adjustAppliedCityPopulation(void* city) {
     return;
   }
   const int population = readField<int>(city, kCityPopulationOffset);
+  logMessageF(2, "adjust: city=%p pop=%d", city, population);
+  if (population < 0 || population > kMaxPlausiblePopulation) {
+    logMessageF(0, "run: implausible population %d (city=%p); skipping write", population, city);
+    return;
+  }
   std::vector<AppliedEntry> entries;
   {
     std::lock_guard<std::mutex> guard(g_appliedMutex);
@@ -267,32 +287,41 @@ void* patchEffectObjectVTable(void* effectObject, std::uint32_t /*typeHash*/) {
   if (source == nullptr) {
     return nullptr;
   }
-  auto* clone = static_cast<void**>(
-      HeapAlloc(GetProcessHeap(), 0, sizeof(void*) * kEffectVTableCloneSlots));
-  if (clone == nullptr) {
+  const std::size_t slots = kEffectVTableCloneSlots;
+  auto* block = static_cast<void**>(
+      HeapAlloc(GetProcessHeap(), 0, sizeof(void*) * (slots + kVTableRttiSlots)));
+  if (block == nullptr) {
     return nullptr;
   }
-  std::memcpy(clone, source, sizeof(void*) * kEffectVTableCloneSlots);
+  block[0] = source[-1]; // MSVC 的 RTTI/COL 指针，必须一并保留
+  std::memcpy(block + kVTableRttiSlots, source, sizeof(void*) * slots);
+  void** clone = block + kVTableRttiSlots;
 
   bool applyPatched = false;
   bool removePatched = false;
-  for (std::size_t i = 0; i < kEffectVTableCloneSlots; ++i) {
+  std::size_t applySlot = 0;
+  std::size_t removeSlot = 0;
+  for (std::size_t i = 0; i < slots; ++i) {
     if (source[i] == api.effectApply) {
       clone[i] = reinterpret_cast<void*>(&ykkz000_perPopulationApply);
       applyPatched = true;
+      applySlot = i;
     } else if (source[i] == api.effectRemove) {
       clone[i] = reinterpret_cast<void*>(&ykkz000_perPopulationRemove);
       removePatched = true;
+      removeSlot = i;
     }
   }
   if (!applyPatched || !removePatched) {
     logMessage(0, "Custom effect: Apply/Remove slot not matched in effect object vtable; "
                    "keeping template behavior");
-    HeapFree(GetProcessHeap(), 0, clone);
+    HeapFree(GetProcessHeap(), 0, block);
     return nullptr;
   }
+  logMessageF(1, "custom: patched effect vtable block=%p vtable=%p applySlot=%zX removeSlot=%zX",
+              block, clone, applySlot, removeSlot);
   *reinterpret_cast<void***>(effectObject) = clone;
-  return clone;
+  return block; // 返回块首（便于日后释放）
 }
 
 // 工厂 Create 槽替换：先调用模板 Create（参数解析与引擎一致），再替换对象 vtable。
@@ -302,18 +331,24 @@ extern "C" void* ykkz000_customFactoryCreate(void* self, void* outSharedPtr,
     return outSharedPtr;
   }
   const auto typeHash = readField<std::uint32_t>(self, kFactoryHashOffset);
+  logMessageF(1, "create: enter hash=0x%08X self=%p out=%p params=%p", typeHash, self, outSharedPtr,
+              params);
+
   BehaviorRecord record;
   if (!findBehavior(typeHash, record) || record.originalCreate == nullptr) {
     logMessage(0, "Custom effect: missing factory behavior record");
     return outSharedPtr;
   }
+  logMessageF(1, "create: calling original=%p", record.originalCreate);
   const auto original = reinterpret_cast<FactoryCreateFn>(record.originalCreate);
   original(self, outSharedPtr, params);
 
   auto* object = *reinterpret_cast<void**>(outSharedPtr);
+  logMessageF(1, "create: original returned object=%p", object);
   if (object != nullptr &&
       record.behavior == bridge::EffectBehavior::kCityYieldModifierPerPopulation) {
     patchEffectObjectVTable(object, typeHash);
+    logMessageF(1, "create: vtable patch done object=%p", object);
   }
   return outSharedPtr;
 }

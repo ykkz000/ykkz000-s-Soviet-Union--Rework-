@@ -75,11 +75,14 @@ void tryLoadPlugin(const std::wstring& file, bridge::Host* host) {
     FreeLibrary(module); // 自身或 GameCore，静默跳过
     return;
   }
+  logMessageF(1, "plugin: LoadLibrary -> %p", module);
 
   auto* getPlugin = reinterpret_cast<bridge::GetPluginFn>(
       GetProcAddress(module, YKKZ000_PLUGIN_EXPORT_GETPLUGIN));
   auto* destroy = reinterpret_cast<bridge::DestroyPluginFn>(
       GetProcAddress(module, YKKZ000_PLUGIN_EXPORT_DESTROY));
+  logMessageF(1, "plugin: GetPlugin=%p DestroyPlugin=%p",
+              reinterpret_cast<void*>(getPlugin), reinterpret_cast<void*>(destroy));
   if (getPlugin == nullptr) {
     logMessage(1, L"Skipped: GetPlugin not exported: " + file);
     FreeLibrary(module);
@@ -87,6 +90,7 @@ void tryLoadPlugin(const std::wstring& file, bridge::Host* host) {
   }
 
   const int result = getPlugin(host);
+  logMessageF(1, "plugin: GetPlugin(host) -> %d", result);
   if (result <= 0) {
     if (destroy != nullptr) {
       destroy();

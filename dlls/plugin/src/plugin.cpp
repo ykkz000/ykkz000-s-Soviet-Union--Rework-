@@ -11,7 +11,9 @@ int registerEffects(Host* host) {
   EffectDesc perPopulation = {};
   perPopulation.typeName = "EFFECT_YKKZ000_ADJUST_CITY_YIELD_PER_POPULATION_MODIFIER";
   perPopulation.templateEffect = "EFFECT_ADJUST_CITY_YIELD_MODIFIER";
+#if !defined(YKKZ000_DISABLE_CUSTOM_BEHAVIOR)
   perPopulation.behavior = EffectBehavior::kCityYieldModifierPerPopulation;
+#endif
   return host->registerEffectType(&perPopulation);
 }
 

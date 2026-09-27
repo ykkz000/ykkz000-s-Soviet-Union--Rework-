@@ -1,5 +1,6 @@
 #include <windows.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <mutex>
@@ -13,7 +14,8 @@ namespace {
 
 // 注册与查询可能来自不同线程（插件注册 vs 引擎 DatabaseWriter 读取），
 // 因此对名字表加锁。#unordered_map 为节点式存储，元素指针在 rehash 后仍
-// 有效，故返回的 c_str() 在元素未被覆盖时保持稳定。
+// 有效；rememberTypeName 对已存在的 hash 不覆盖值，使已返回的 c_str() 指针
+// 在进程生命周期内持续有效（引擎可能长期持有 GetTypeName 的返回值）。
 std::mutex g_typeNamesMutex;
 std::unordered_map<std::uint32_t, std::string> g_typeNames;
 
@@ -27,6 +29,10 @@ extern "C" const char* ykkz000_GetTypeName(void* self) {
   }
   const auto hash = *reinterpret_cast<const std::uint32_t*>(
       static_cast<const std::uint8_t*>(self) + kFactoryHashOffset);
+  static std::atomic<bool> s_logged{false};
+  if (!s_logged.exchange(true)) {
+    logMessageF(1, "getname: first call self=%p hash=0x%08X", self, hash);
+  }
 
   std::lock_guard<std::mutex> guard(g_typeNamesMutex);
   const auto it = g_typeNames.find(hash);
@@ -38,7 +44,7 @@ void rememberTypeName(std::uint32_t typeHash, const char* typeName) {
     return;
   }
   std::lock_guard<std::mutex> guard(g_typeNamesMutex);
-  g_typeNames.insert_or_assign(typeHash, std::string(typeName));
+  g_typeNames.emplace(typeHash, std::string(typeName));
 }
 
 void* cloneFactoryVTable(void* templateFactory) {
@@ -49,14 +55,22 @@ void* cloneFactoryVTable(void* templateFactory) {
   if (source == nullptr) {
     return nullptr;
   }
-  const std::size_t bytes = sizeof(void*) * kFactoryVTableSlots;
-  auto* clone = static_cast<void**>(HeapAlloc(GetProcessHeap(), 0, bytes));
-  if (clone == nullptr) {
+  logMessageF(1, "clone: template=%p source vtable=%p slots=%zu", templateFactory, source,
+              kFactoryVTableSlots);
+  const std::size_t slots = kFactoryVTableSlots;
+  auto* block = static_cast<void**>(
+      HeapAlloc(GetProcessHeap(), 0, sizeof(void*) * (slots + kVTableRttiSlots)));
+  if (block == nullptr) {
     return nullptr;
   }
-  std::memcpy(clone, source, bytes);
-  clone[kFactoryTypeNameSlot] = reinterpret_cast<void*>(&ykkz000_GetTypeName);
-  return clone;
+  block[0] = source[-1]; // MSVC 的 RTTI/COL 指针，必须一并保留
+  std::memcpy(block + kVTableRttiSlots, source, sizeof(void*) * slots);
+
+  void** vtable = block + kVTableRttiSlots; // 交回引擎与调用方的 vptr
+  vtable[kFactoryTypeNameSlot] = reinterpret_cast<void*>(&ykkz000_GetTypeName);
+  logMessageF(1, "clone: block=%p vtable=%p nameSlot=%zX rtti=%p", block, vtable,
+              kFactoryTypeNameSlot, block[0]);
+  return vtable;
 }
 
 } // namespace ykkz000::loader

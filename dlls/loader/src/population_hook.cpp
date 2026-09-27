@@ -1,5 +1,6 @@
 #include <windows.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -42,7 +43,13 @@ void ChangePopulation_Hook(void* city, int delta) {
     g_originalChangePopulation(city, delta);
     return;
   }
+  static std::atomic<long> s_calls{0};
+  const long call = ++s_calls;
+  const bool verbose = call <= 32 || (call % 1024) == 0;
   const int before = readPopulation(city);
+  if (verbose) {
+    logMessageF(1, "hook: call#%ld city=%p delta=%d pop=%d", call, city, delta, before);
+  }
   g_originalChangePopulation(city, delta);
   if (readPopulation(city) != before) {
     adjustAppliedCityPopulation(city);
@@ -58,6 +65,7 @@ bool installPopulationHook() {
     return true;
   }
   const GameCoreApi& api = gameCore();
+  logMessageF(1, "hook: changePopulation=%p", api.changePopulation);
   if (api.changePopulation == nullptr) {
     logMessage(0, "Population hook: ChangePopulation entry unavailable; per-population "
                   "effects will fall back to a founding-time snapshot");
@@ -65,6 +73,7 @@ bool installPopulationHook() {
   }
   if (!g_minHookInitialized) {
     const MH_STATUS status = MH_Initialize();
+    logMessageF(1, "hook: MH_Initialize -> %d", static_cast<int>(status));
     if (status != MH_OK && status != MH_ERROR_ALREADY_INITIALIZED) {
       logMessage(0, "Population hook: MinHook initialization failed; per-population effects "
                     "will fall back to a founding-time snapshot");
@@ -76,6 +85,8 @@ bool installPopulationHook() {
     const MH_STATUS created = MH_CreateHook(
         api.changePopulation, reinterpret_cast<LPVOID>(&ChangePopulation_Hook),
         reinterpret_cast<LPVOID*>(&g_originalChangePopulation));
+    logMessageF(1, "hook: MH_CreateHook -> %d trampoline=%p", static_cast<int>(created),
+                g_originalChangePopulation);
     if (created != MH_OK) {
       logMessage(0, "Population hook: MinHook CreateHook failed; per-population effects will "
                     "fall back to a founding-time snapshot");
@@ -87,6 +98,7 @@ bool installPopulationHook() {
     }
   }
   const MH_STATUS enabled = MH_EnableHook(api.changePopulation);
+  logMessageF(1, "hook: MH_EnableHook -> %d", static_cast<int>(enabled));
   if (enabled != MH_OK) {
     logMessage(0, "Population hook: MinHook EnableHook failed; per-population effects will "
                   "fall back to a founding-time snapshot");
