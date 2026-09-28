@@ -36,6 +36,11 @@ Options:
                             directory before building.
   --cmake <path>            Path to cmake.exe.
                             Default: cmake found on PATH.
+  --cmake-arg <arg>         Extra argument passed to the CMake configure step
+                            (for example -D<option>=<value>); may be repeated.
+                            Use the --cmake-arg=<arg> form for values that
+                            start with '-'.
+                            Default: (none)
   --dll-build-dir <path>    CMake build directory; removed by --clean or
                             --force-rebuild=dll.
                             Default: <dll-dir>\build
@@ -70,6 +75,7 @@ Examples:
   .\build.ps1 mod.civ6proj --clean -o "C:\temp\mod-build"
   .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --force-rebuild=dll
   .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --skip=art,dll
+  .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --force-rebuild=dll --cmake-arg=-DYKKZ000_ENABLE_STRENGTH_PROBE=ON
 "@
 }
 
@@ -107,6 +113,7 @@ function Parse-Args {
     BaseAssets   = "C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI SDK Assets"
     BaseSdk      = "C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI SDK"
     CMake        = $null
+    CMakeArgs    = [System.Collections.Generic.List[string]]::new()
     DllDir       = $null
     DllBuildDir  = $null
     DllPrefix    = $DefaultDllPrefix
@@ -204,6 +211,19 @@ function Parse-Args {
       $v = $a.Substring('--cmake='.Length)
       if ([string]::IsNullOrEmpty($v)) { throw "Option '--cmake' requires a value." }
       $opts.CMake = $v
+      $i++
+    }
+    elseif ($a -eq '--cmake-arg') {
+      if ($i + 1 -ge $ArgList.Count) { throw "Option '$a' requires a value." }
+      $v = $ArgList[$i + 1]
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '$a' requires a value." }
+      $opts.CMakeArgs.Add($v)
+      $i += 2
+    }
+    elseif ($a -like '--cmake-arg=*') {
+      $v = $a.Substring('--cmake-arg='.Length)
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '--cmake-arg' requires a value." }
+      $opts.CMakeArgs.Add($v)
       $i++
     }
     elseif ($a -eq '--dll-dir') {
@@ -334,6 +354,15 @@ function Assert-Inputs {
     throw "Options '--clean' and '--skip=art' cannot be used together."
   }
 
+  foreach ($arg in $opts.CMakeArgs) {
+    if ([string]::IsNullOrWhiteSpace($arg)) {
+      throw "Option '--cmake-arg' requires a non-empty value."
+    }
+  }
+  if ($skipDll -and $opts.CMakeArgs.Count -gt 0) {
+    throw "Option '--cmake-arg' has no effect together with '--skip=dll' (the DLL build is skipped)."
+  }
+
   $inputPath = Resolve-FullPath $opts.Input
   if (-not (Test-Path -LiteralPath $inputPath -PathType Leaf)) {
     throw "Project file not found: $inputPath"
@@ -416,6 +445,7 @@ function Assert-Inputs {
     ForceArt     = $forceArt
     Clean        = [bool]$opts.Clean
     CMake        = $cmake
+    CMakeArgs    = @($opts.CMakeArgs)
     DllDir       = $dllDir
     DllBuildDir  = $dllBuildDir
     DllPrefix    = $dllPrefix
@@ -585,7 +615,8 @@ function Invoke-DllBuild {
     [string]$DllDir,
     [string]$BuildDir,
     [string]$Config,
-    [string]$Generator
+    [string]$Generator,
+    [string[]]$CMakeArgs = @()
   )
 
   if (-not (Test-Path -LiteralPath (Join-Path $DllDir 'CMakeLists.txt') -PathType Leaf)) {
@@ -606,8 +637,12 @@ function Invoke-DllBuild {
     }
   }
 
+  if ($null -ne $CMakeArgs -and $CMakeArgs.Count -gt 0) {
+    Write-Host ("Extra CMake configure arguments: {0}" -f ($CMakeArgs -join ' '))
+  }
+
   Write-Host ("Configuring the DLL build in {0}" -f $BuildDir)
-  & $CMake -S $DllDir -B $BuildDir @generatorArgs
+  & $CMake -S $DllDir -B $BuildDir @generatorArgs @CMakeArgs
   if ($LASTEXITCODE -ne 0) {
     throw "CMake configuration failed (exit $LASTEXITCODE)."
   }
@@ -1102,7 +1137,7 @@ function Main {
 
   $dllFiles = @()
   if (-not $ctx.SkipDll) {
-    Invoke-DllBuild -CMake $ctx.CMake -DllDir $ctx.DllDir -BuildDir $ctx.DllBuildDir -Config $ctx.DllConfig -Generator $ctx.DllGenerator
+    Invoke-DllBuild -CMake $ctx.CMake -DllDir $ctx.DllDir -BuildDir $ctx.DllBuildDir -Config $ctx.DllConfig -Generator $ctx.DllGenerator -CMakeArgs $ctx.CMakeArgs
     $dllFiles = @(Copy-DllArtifacts -Ctx $ctx)
   }
   else {
