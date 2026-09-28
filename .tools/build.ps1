@@ -26,42 +26,71 @@ Arguments:
   <project.civ6proj>        Path to the project file to build (required).
 
 Options:
+  --base-assets <path>      Civilization VI SDK Assets root.
+                            Default: C:\Program Files (x86)\Steam\steamapps\
+                            common\Sid Meier's Civilization VI SDK Assets
+  --base-sdk <path>         Civilization VI SDK root.
+                            Default: C:\Program Files (x86)\Steam\steamapps\
+                            common\Sid Meier's Civilization VI SDK
+  --clean                   Delete the output directory and the DLL build
+                            directory before building.
+  --cmake <path>            Path to cmake.exe.
+                            Default: cmake found on PATH.
+  --dll-build-dir <path>    CMake build directory; removed by --clean or
+                            --force-rebuild=dll.
+                            Default: <dll-dir>\build
+  --dll-config <cfg>        CMake build configuration.
+                            Default: RelWithDebInfo
+  --dll-dir <path>          CMake source directory for the DLLs.
+                            Default: <projectDir>\natives
+  --dll-generator <gen>     CMake generator for the DLL build.
+                            Default: the CMake default (Visual Studio).
+  --dll-prefix <name>       Deployed loader DLL prefix; must match the
+                            DllPrefix in Data/YKKZ000_GameCores.sql.
+                            Default: GameCore_YKKZ000_Loader_XP2
+  --force-rebuild <targets> Force a clean rebuild of the given targets.
+                            <targets> is a comma-separated list of all, dll,
+                            art; the option may be repeated. dll deletes the
+                            CMake build directory; art deletes the cooked art
+                            and the .dep before cooking.
+                            Default: (none)
+  -h, --help                Show this help and exit.
   -o, --output <path>       Build output directory.
                             Default: <My Documents>\My Games\Sid Meier's
                             Civilization VI\Mods\<projectName>
-      --skip-art            Do not run the asset cooker; reuse the art already
-                            present in the output directory.
-      --clean               Delete the output directory and the DLL build
-                            directory before building.
-      --skip-dll            Do not build or deploy the GameCore DLLs; reuse
-                            the DLLs already present in the output directory.
-      --cmake <path>        Path to cmake.exe.
-                            Default: cmake found on PATH.
-      --dll-dir <path>      CMake source directory for the DLLs.
-                            Default: <projectDir>\natives
-      --dll-build-dir <path>
-                            CMake build directory, removed by --clean.
-                            Default: <dll-dir>\build
-      --dll-prefix <name>   Deployed loader DLL prefix; must match the
-                            DllPrefix in Data/YKKZ000_GameCores.sql.
-                            Default: GameCore_YKKZ000_Loader_XP2
-      --dll-config <cfg>    CMake build configuration.
-                            Default: RelWithDebInfo
-      --dll-generator <gen>
-                            CMake generator for the DLL build.
-                            Default: the CMake default (Visual Studio).
-      --base-assets <path>  Civilization VI SDK Assets root.
-                            Default: C:\Program Files (x86)\Steam\steamapps\
-                            common\Sid Meier's Civilization VI SDK Assets
-      --base-sdk <path>     Civilization VI SDK root.
-                            Default: C:\Program Files (x86)\Steam\steamapps\
-                            common\Sid Meier's Civilization VI SDK
-  -h, --help                Show this help and exit.
+  --skip <targets>          Skip the given targets. <targets> is a
+                            comma-separated list of all, dll, art; the option
+                            may be repeated. dll reuses the DLLs already
+                            deployed; art reuses the art already cooked in the
+                            output directory.
+                            Default: (none)
 
 Examples:
   .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj"
   .\build.ps1 mod.civ6proj --clean -o "C:\temp\mod-build"
+  .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --force-rebuild=dll
+  .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --skip=art,dll
 "@
+}
+
+function Add-RevisionTarget {
+  param(
+    [System.Collections.Generic.HashSet[string]]$Set,
+    [string]$Value,
+    [string]$OptionName
+  )
+  foreach ($part in ($Value -split ',')) {
+    $token = $part.Trim().ToLowerInvariant()
+    if ([string]::IsNullOrEmpty($token)) {
+      throw "Option '$OptionName' has an empty value; expected a comma-separated list of: all, dll, art."
+    }
+    switch ($token) {
+      'all' { [void]$Set.Add('dll'); [void]$Set.Add('art') }
+      'dll' { [void]$Set.Add('dll') }
+      'art' { [void]$Set.Add('art') }
+      default { throw "Invalid value '$token' for '$OptionName'; expected one of: all, dll, art." }
+    }
+  }
 }
 
 function Parse-Args {
@@ -72,8 +101,8 @@ function Parse-Args {
   $opts = [ordered]@{
     Input        = $null
     Output       = $null
-    SkipArt      = $false
-    SkipDll      = $false
+    Skip         = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    ForceRebuild = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
     Clean        = $false
     BaseAssets   = "C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI SDK Assets"
     BaseSdk      = "C:\Program Files (x86)\Steam\steamapps\common\Sid Meier's Civilization VI SDK"
@@ -132,16 +161,36 @@ function Parse-Args {
       $opts.BaseSdk = $v
       $i++
     }
-    elseif ($a -eq '--skip-art') {
-      $opts.SkipArt = $true
+    elseif ($a -eq '--skip') {
+      if ($i + 1 -lt $ArgList.Count -and -not $ArgList[$i + 1].StartsWith('-')) {
+        Add-RevisionTarget -Set $opts.Skip -Value $ArgList[$i + 1] -OptionName '--skip'
+        $i += 2
+      }
+      else {
+        Add-RevisionTarget -Set $opts.Skip -Value 'all' -OptionName '--skip'
+        $i++
+      }
+    }
+    elseif ($a -like '--skip=*') {
+      Add-RevisionTarget -Set $opts.Skip -Value $a.Substring('--skip='.Length) -OptionName '--skip'
+      $i++
+    }
+    elseif ($a -eq '--force-rebuild') {
+      if ($i + 1 -lt $ArgList.Count -and -not $ArgList[$i + 1].StartsWith('-')) {
+        Add-RevisionTarget -Set $opts.ForceRebuild -Value $ArgList[$i + 1] -OptionName '--force-rebuild'
+        $i += 2
+      }
+      else {
+        Add-RevisionTarget -Set $opts.ForceRebuild -Value 'all' -OptionName '--force-rebuild'
+        $i++
+      }
+    }
+    elseif ($a -like '--force-rebuild=*') {
+      Add-RevisionTarget -Set $opts.ForceRebuild -Value $a.Substring('--force-rebuild='.Length) -OptionName '--force-rebuild'
       $i++
     }
     elseif ($a -eq '--clean') {
       $opts.Clean = $true
-      $i++
-    }
-    elseif ($a -eq '--skip-dll') {
-      $opts.SkipDll = $true
       $i++
     }
     elseif ($a -eq '--cmake') {
@@ -271,8 +320,18 @@ function Test-PathEqual {
 function Assert-Inputs {
   param($opts)
 
-  if ($opts.Clean -and $opts.SkipArt) {
-    throw "Options '--clean' and '--skip-art' cannot be used together."
+  $skipDll  = $opts.Skip.Contains('dll')
+  $skipArt  = $opts.Skip.Contains('art')
+  $forceDll = $opts.ForceRebuild.Contains('dll')
+  $forceArt = $opts.ForceRebuild.Contains('art')
+
+  foreach ($name in @('dll', 'art')) {
+    if ($opts.Skip.Contains($name) -and $opts.ForceRebuild.Contains($name)) {
+      throw "Options '--skip=$name' and '--force-rebuild=$name' cannot be used together."
+    }
+  }
+  if ($opts.Clean -and $skipArt) {
+    throw "Options '--clean' and '--skip=art' cannot be used together."
   }
 
   $inputPath = Resolve-FullPath $opts.Input
@@ -299,7 +358,6 @@ function Assert-Inputs {
     $out = Remove-TrailingSeparator (Resolve-FullPath $opts.Output)
   }
 
-  $skipDll = [bool]$opts.SkipDll
   if ([string]::IsNullOrEmpty($opts.DllDir)) {
     $dllDir = Join-Path $projectDir 'natives'
   }
@@ -350,9 +408,13 @@ function Assert-Inputs {
     DefaultOut   = $defaultOut
     BaseAssets   = (Resolve-FullPath $opts.BaseAssets)
     BaseSdk      = (Resolve-FullPath $opts.BaseSdk)
-    SkipArt      = [bool]$opts.SkipArt
-    Clean        = [bool]$opts.Clean
+    Skip         = $opts.Skip
+    ForceRebuild = $opts.ForceRebuild
+    SkipArt      = $skipArt
     SkipDll      = $skipDll
+    ForceDll     = $forceDll
+    ForceArt     = $forceArt
+    Clean        = [bool]$opts.Clean
     CMake        = $cmake
     DllDir       = $dllDir
     DllBuildDir  = $dllBuildDir
@@ -637,6 +699,38 @@ function Remove-DllIntermediate {
   }
   if (Test-Path -LiteralPath $BuildDir) {
     Remove-Item -LiteralPath $BuildDir -Recurse -Force -ErrorAction Stop
+  }
+}
+
+function Remove-CookedArt {
+  param([string]$Out, [string]$ProjectDir, [string]$DefaultOut)
+
+  if ([string]::IsNullOrWhiteSpace($Out)) {
+    throw "Refusing to clean cooked art: the output path is empty."
+  }
+  $fullOut = Remove-TrailingSeparator $Out
+  if (Test-PathEqual $fullOut $ProjectDir) {
+    throw "Refusing to clean cooked art in the project directory: $fullOut"
+  }
+  if (-not [string]::IsNullOrEmpty($DefaultOut) -and (Test-PathUnder $DefaultOut $fullOut)) {
+    throw "Refusing to clean '$fullOut' because it contains the default mod output directory."
+  }
+
+  $targets = @(
+    (Join-Path $fullOut 'ArtDefs'),
+    (Join-Path $fullOut 'Platforms\Windows\BLPs'),
+    (Join-Path $fullOut 'Platforms\MacOS\BLPs')
+  )
+  foreach ($target in $targets) {
+    if (-not (Test-PathUnder $target $fullOut)) {
+      throw "Refusing to clean outside the output directory: $target"
+    }
+    if (Test-Path -LiteralPath $target) {
+      Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+    }
+  }
+  foreach ($dep in @(Get-ChildItem -LiteralPath $fullOut -Filter *.dep -File -ErrorAction SilentlyContinue)) {
+    Remove-Item -LiteralPath $dep.FullName -Force -ErrorAction Stop
   }
 }
 
@@ -995,7 +1089,13 @@ function Main {
 
   if ($ctx.Clean) {
     Invoke-Clean -Out $ctx.Out -ProjectDir $ctx.ProjectDir -DefaultOut $ctx.DefaultOut
+  }
+  if ($ctx.Clean -or $ctx.ForceDll) {
     Remove-DllIntermediate -BuildDir $ctx.DllBuildDir -ProjectDir $ctx.ProjectDir
+  }
+  if ($ctx.ForceArt) {
+    Remove-CookedArt -Out $ctx.Out -ProjectDir $ctx.ProjectDir -DefaultOut $ctx.DefaultOut
+    Write-Host "Forced art rebuild: cleared cooked art and .dep."
   }
 
   $copyResult = Copy-ContentFiles -ContentList $project.Content -ProjectDir $ctx.ProjectDir -Out $ctx.Out -SkipArt $ctx.SkipArt
@@ -1008,7 +1108,7 @@ function Main {
   else {
     $dllFiles = @(Get-DeployedDllFiles -Ctx $ctx)
     if ($dllFiles.Count -lt 2) {
-      throw "Option '--skip-dll' was given, but the expected loader and plugin DLLs were not found in '$($ctx.Out)'. Build once without '--skip-dll' first."
+      throw "Option '--skip=dll' was given, but the expected loader and plugin DLLs were not found in '$($ctx.Out)'. Build once without '--skip=dll' first."
     }
   }
 

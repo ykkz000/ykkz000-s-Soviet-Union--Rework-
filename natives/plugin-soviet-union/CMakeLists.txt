@@ -2,6 +2,7 @@ project(YKKZ000SovietUnionPlugin LANGUAGES CXX)
 
 add_library(YKKZ000SovietUnionPlugin SHARED
   src/plugin.cpp
+  resource.rc
   plugin.def)
 
 set_target_properties(YKKZ000SovietUnionPlugin PROPERTIES
