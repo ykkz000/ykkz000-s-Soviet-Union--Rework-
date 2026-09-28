@@ -11,6 +11,7 @@ add_library(YKKZ000Loader SHARED
   src/population_hook.cpp
   src/crash_capture.cpp
   src/plugin_manager.cpp
+  resource.rc
   loader.def)
 
 set_target_properties(YKKZ000Loader PROPERTIES

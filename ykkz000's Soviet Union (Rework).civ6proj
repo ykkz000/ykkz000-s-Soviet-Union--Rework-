@@ -421,6 +421,15 @@
     <Content Include="XLPs\UIMoments.xlp">
       <SubType>Content</SubType>
     </Content>
+    <Content Include="LICENSE">
+      <SubType>Content</SubType>
+    </Content>
+    <Content Include="NOTICE">
+      <SubType>Content</SubType>
+    </Content>
+    <Content Include="THIRD_PARTY_NOTICES.txt">
+      <SubType>Content</SubType>
+    </Content>
   </ItemGroup>
   <Import Project="$(MSBuildLocalExtensionPath)Civ6.targets" />
 </Project>
