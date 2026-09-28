@@ -44,4 +44,4 @@ target_compile_features(ykkz000_bridge INTERFACE cxx_std_20)
 
 add_subdirectory(third_party/minhook)
 add_subdirectory(loader)
-add_subdirectory(plugin)
+add_subdirectory(plugin-soviet-union)

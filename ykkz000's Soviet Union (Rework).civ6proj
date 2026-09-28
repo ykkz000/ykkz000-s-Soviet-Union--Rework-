@@ -30,7 +30,7 @@
   <ItemGroup>
     <Folder Include="Artdefs\" />
     <Folder Include="Data" />
-    <Folder Include="dlls\" />
+    <Folder Include="natives\" />
     <Folder Include="Platforms\" />
     <Folder Include="Platforms\Windows\" />
     <Folder Include="Platforms\Windows\Audio\" />

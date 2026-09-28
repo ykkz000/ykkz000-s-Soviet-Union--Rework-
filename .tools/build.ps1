@@ -1,8 +1,8 @@
 #Requires -Version 5.1
 
 # --- DLL build and deployment conventions ---
-# The loader is produced by dlls/loader (OUTPUT_NAME equals $LoaderBuildDll) and is
-# deployed as <DllPrefix>_FinalRelease.dll. The plugin is produced by dlls/plugin and
+# The loader is produced by natives/loader (OUTPUT_NAME equals $LoaderBuildDll) and is
+# deployed as <DllPrefix>_FinalRelease.dll. The plugin is produced by natives/plugin-soviet-union and
 # is deployed into the dedicated directory scanned by the loader. DllPrefix must match
 # the DllPrefix used in Data/YKKZ000_GameCores.sql.
 $LoaderTarget     = 'YKKZ000Loader'
@@ -38,7 +38,7 @@ Options:
       --cmake <path>        Path to cmake.exe.
                             Default: cmake found on PATH.
       --dll-dir <path>      CMake source directory for the DLLs.
-                            Default: <projectDir>\dlls
+                            Default: <projectDir>\natives
       --dll-build-dir <path>
                             CMake build directory, removed by --clean.
                             Default: <dll-dir>\build
@@ -301,7 +301,7 @@ function Assert-Inputs {
 
   $skipDll = [bool]$opts.SkipDll
   if ([string]::IsNullOrEmpty($opts.DllDir)) {
-    $dllDir = Join-Path $projectDir 'dlls'
+    $dllDir = Join-Path $projectDir 'natives'
   }
   else {
     $dllDir = Remove-TrailingSeparator (Resolve-FullPath $opts.DllDir)
