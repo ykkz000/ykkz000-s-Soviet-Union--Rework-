@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <mutex>
 
 #include "loader_internal.h"
@@ -19,6 +20,39 @@ CreateGameContextFn g_realCreate = nullptr;
 DestroyGameContextFn g_realDestroy = nullptr;
 TelemetryHashFn g_realTelemetryHash = nullptr;
 bridge::Host g_host = {};
+
+// —— 暴露给插件的受校验读写（bridge::Host 服务）——
+int hostReadField(const void* base, std::size_t offset, std::size_t bytes, void* out) {
+  if (base == nullptr || out == nullptr || bytes == 0) {
+    return 0;
+  }
+  const auto* address = static_cast<const std::uint8_t*>(base) + offset;
+  if (!isReadableRegion(address, bytes)) {
+    return 0;
+  }
+  std::memcpy(out, address, bytes);
+  return 1;
+}
+
+int hostWriteField(void* base, std::size_t offset, std::size_t bytes, const void* in) {
+  if (base == nullptr || in == nullptr || bytes == 0) {
+    return 0;
+  }
+  auto* address = static_cast<std::uint8_t*>(base) + offset;
+  if (!isReadableRegion(address, bytes)) {
+    return 0;
+  }
+  std::memcpy(address, in, bytes);
+  return 1;
+}
+
+int hostIsCandidateObject(const void* pointer) {
+  return isCandidateObject(pointer) ? 1 : 0;
+}
+
+int hostIsReadableRegion(const void* address, std::size_t bytes) {
+  return isReadableRegion(address, bytes) ? 1 : 0;
+}
 
 bool initialize() {
   installCrashCapture();  // 尽早安装，保证之后任何崩溃都能记录
@@ -59,6 +93,16 @@ bool initialize() {
     g_host.log = &logMessage;
     g_host.gameCoreModule = api.module;
     g_host.getEffectRegistry = reinterpret_cast<bridge::GetEffectRegistryFn>(api.getEffectRegistry);
+    g_host.engine = &engineApi();
+    g_host.installHook = &serviceInstallHook;
+    g_host.removeHook = &serviceRemoveHook;
+    g_host.patchEffectSlot = &hostPatchEffectSlot;
+    g_host.readField = &hostReadField;
+    g_host.writeField = &hostWriteField;
+    g_host.isCandidateObject = &hostIsCandidateObject;
+    g_host.isReadableRegion = &hostIsReadableRegion;
+    g_host.onGameContext = nullptr; // 由各插件在自己的 Host 副本中登记
+    g_host.pluginHandle = nullptr;  // 由每个插件的 Host 副本填入
   }
 
   // 必须在真实 DllCreateGameContext 之前完成注册：其后会触发
@@ -84,8 +128,9 @@ bool loaderInitialized() {
 void* createGameContext() {
   LogScope scope("create game context");
   initializeLoaderOnce();
-  // 注册只发生一次，而 destroyGameContext 会停用 hook；按已注册行为重新启用。
-  installPopulationHookIfNeeded();
+  // 通知插件：新上下文建立。插件在此重新安装/启用自身的 hook 并清空随上下文失效
+  // 的缓存；Loader 不再识别任何具体行为，故不再有 install*IfNeeded()。
+  notifyPluginsGameContext(bridge::GameContextEvent::kCreated, nullptr);
   (void)installEffectHandlerHook();
   if (g_realCreate == nullptr) {
     return nullptr;
@@ -103,9 +148,15 @@ void destroyGameContext(void* context) {
     LogScope call("call real DllDestroyGameContext");
     g_realDestroy(context);
   }
-  uninstallPopulationHook();
+  // 上下文已销毁：通知插件停用 hook、清理缓存。
+  //
+  // 注意：插件 DLL 保持加载，不在此处卸载。游戏在主菜单与对局之间会反复
+  // create/destroy 上下文，而效果注册只发生一次（注册必须早于 ModifierLibrary::
+  // Initialize），卸载后无法在下一个上下文重新注册。插件随进程一起存活；真正需要
+  // 卸载时（进程退出）由 unloadPlugins() 按“先通知、再兜底还原、后 FreeLibrary”
+  // 的顺序处理。
+  notifyPluginsGameContext(bridge::GameContextEvent::kDestroyed, context);
   uninstallEffectHandlerHook();
-  unloadPlugins();
 }
 
 std::uint64_t telemetrySessionHash() {

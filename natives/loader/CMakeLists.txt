@@ -6,9 +6,10 @@ add_library(YKKZ000Loader SHARED
   src/gamecore.cpp
   src/registry.cpp
   src/vtable_clone.cpp
-  src/custom_effect.cpp
+  src/effect_mechanism.cpp
+  src/hook_service.cpp
   src/effect_handler.cpp
-  src/population_hook.cpp
+  src/memory_probe.cpp
   src/crash_capture.cpp
   src/plugin_manager.cpp
   resource.rc

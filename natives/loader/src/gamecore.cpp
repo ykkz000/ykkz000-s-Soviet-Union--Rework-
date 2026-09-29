@@ -46,6 +46,11 @@ struct BuildProfile {
   std::ptrdiff_t rvaReserveVector;
   std::ptrdiff_t rvaEffectApply;
   std::ptrdiff_t rvaEffectRemove;
+  std::ptrdiff_t rvaEffectStrengthApply;
+  std::ptrdiff_t rvaEffectStrengthRemove;
+  std::ptrdiff_t rvaGetPlayerByIndex;
+  std::ptrdiff_t rvaGetGameManager;
+  std::ptrdiff_t rvaStrengthAccumulate;
   std::ptrdiff_t rvaChangeYieldModifier;
   std::ptrdiff_t rvaChangePopulation;
   // 处理器注册（handler registry）：前三项为代码；后两项为数据（handler 对象/描述表，
@@ -74,6 +79,11 @@ constexpr BuildProfile kKnownXp2Build{
     0x308F50,     // std::vector<...>::_Reserve / 扩容
     0x83B220,     // Effects::AdjustCityYieldModifier::Apply
     0x83B5A0,     // Effects::AdjustCityYieldModifier::Remove
+    0x8D9110,     // Effects::AdjustPlayerStrengthModifier::Apply
+    0x8DA240,     // Effects::AdjustPlayerStrengthModifier::Remove
+    0x44F00,      // FUN_180044f00(int playerIndex) -> Player*（无边界检查）
+    0x44D60,      // FUN_180044d60() -> GameManager*（+0x50/+0x58 为玩家向量）
+    0x944040,     // FUN_180944040(target, playerId, amount)：战斗力修正的写入点
     0x131CF0,     // City::Instance::ChangeYieldModifier(YieldTypes, int)
     0x131B80,     // City::Instance::ChangePopulation(int delta)
     0x4891B0,     // FUN_1804891b0(void* root)：建立内建 handler 注册表
@@ -258,6 +268,11 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   resolved.reserveVector = computeRva(kKnownXp2Build.rvaReserveVector);
   resolved.effectApply = computeRva(kKnownXp2Build.rvaEffectApply);
   resolved.effectRemove = computeRva(kKnownXp2Build.rvaEffectRemove);
+  resolved.effectStrengthApply = computeRva(kKnownXp2Build.rvaEffectStrengthApply);
+  resolved.effectStrengthRemove = computeRva(kKnownXp2Build.rvaEffectStrengthRemove);
+  resolved.getPlayerByIndex = computeRva(kKnownXp2Build.rvaGetPlayerByIndex);
+  resolved.getGameManager = computeRva(kKnownXp2Build.rvaGetGameManager);
+  resolved.strengthAccumulate = computeRva(kKnownXp2Build.rvaStrengthAccumulate);
   resolved.changeYieldModifier = computeRva(kKnownXp2Build.rvaChangeYieldModifier);
   resolved.changePopulation = computeRva(kKnownXp2Build.rvaChangePopulation);
   resolved.handlerRegistryInit = computeRva(kKnownXp2Build.rvaHandlerRegistryInit);
@@ -269,7 +284,7 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   resolved.templateApply = computeRva(kKnownXp2Build.rvaTemplateApply);
   resolved.effectHandlerDispatch = computeRva(kKnownXp2Build.rvaEffectHandlerDispatch);
 #if defined(YKKZ000_DISABLE_POPULATION_HOOK)
-  // 诊断开关：置空入口，installPopulationHook() 会优雅退化为“建立时快照”。
+  // 诊断开关：置空入口；插件据此跳过人口 hook，效果退化为“建立时快照”。
   resolved.changePopulation = nullptr;
 #endif
   resolved.module = module;
@@ -281,6 +296,16 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
          kKnownXp2Build.rvaReserveVector);
   logRva("effectApply", resolved.effectApply, module, kKnownXp2Build.rvaEffectApply);
   logRva("effectRemove", resolved.effectRemove, module, kKnownXp2Build.rvaEffectRemove);
+  logRva("effectStrengthApply", resolved.effectStrengthApply, module,
+         kKnownXp2Build.rvaEffectStrengthApply);
+  logRva("effectStrengthRemove", resolved.effectStrengthRemove, module,
+         kKnownXp2Build.rvaEffectStrengthRemove);
+  logRva("getPlayerByIndex", resolved.getPlayerByIndex, module,
+         kKnownXp2Build.rvaGetPlayerByIndex);
+  logRva("getGameManager", resolved.getGameManager, module,
+         kKnownXp2Build.rvaGetGameManager);
+  logRva("strengthAccumulate", resolved.strengthAccumulate, module,
+         kKnownXp2Build.rvaStrengthAccumulate);
   logRva("changeYieldModifier", resolved.changeYieldModifier, module,
          kKnownXp2Build.rvaChangeYieldModifier);
   logRva("changePopulation", resolved.changePopulation, module,
@@ -298,8 +323,8 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   logRva("templateApply", resolved.templateApply, module, kKnownXp2Build.rvaTemplateApply);
   logRva("effectHandlerDispatch", resolved.effectHandlerDispatch, module,
          kKnownXp2Build.rvaEffectHandlerDispatch);
-  // changePopulation 不列入致命检查：缺失时 installPopulationHook() 会退化为
-  // 建立时人口快照，而不是让整个 Loader 无法初始化。
+  // changePopulation 不列入致命检查：缺失时插件跳过人口 hook，退化为建立时人口快照，
+  // 而不是让整个 Loader 无法初始化。
   if (resolved.getEffectRegistry == nullptr || resolved.mallocTemp == nullptr ||
       resolved.reserveVector == nullptr || resolved.effectApply == nullptr ||
       resolved.effectRemove == nullptr || resolved.changeYieldModifier == nullptr) {
@@ -354,6 +379,24 @@ HMODULE tryLoadPath(const std::wstring& full) {
     return nullptr;
   }
   return module;
+}
+
+// 由已解析的 GameCoreApi 生成对插件可见的 EngineApi（只读函数指针集合）。
+// 仅暴露“机制入口”，不含任何行为策略；proposedCombatAdjust 即战斗力修正写入点
+// FUN_180944040（DB 名 GameEffects::ProposedCombat::AdjustPlayerStrengthModifier）。
+bridge::EngineApi g_engineApi;
+void publishEngineApi(const GameCoreApi& api) {
+  bridge::EngineApi engine = {};
+  engine.effectApply = api.effectApply;
+  engine.effectRemove = api.effectRemove;
+  engine.effectStrengthApply = api.effectStrengthApply;
+  engine.effectStrengthRemove = api.effectStrengthRemove;
+  engine.proposedCombatAdjust = api.strengthAccumulate;
+  engine.changeYieldModifier = api.changeYieldModifier;
+  engine.changePopulation = api.changePopulation;
+  engine.getPlayer = api.getPlayerByIndex;
+  engine.getGameManager = api.getGameManager;
+  g_engineApi = engine;
 }
 
 } // namespace
@@ -494,6 +537,7 @@ bool ensureGameCoreLoaded() {
     GameCoreApi resolved;
     if (resolveApi(module, resolved)) {
       g_api = resolved;
+      publishEngineApi(resolved);
       logMessageF(1, "GameCore module=%p base=%p", module, imageBegin(module));
       logMessage(1, L"Loaded real GameCore: " + path);
       return true;
@@ -510,6 +554,7 @@ bool ensureGameCoreLoaded() {
     GameCoreApi resolved;
     if (resolveApi(module, resolved)) {
       g_api = resolved;
+      publishEngineApi(resolved);
       logMessageF(1, "GameCore module=%p base=%p", module, imageBegin(module));
       logMessage(1, std::wstring(L"Loaded real GameCore via DLL search path: ") + buffer);
       return true;
@@ -524,6 +569,10 @@ bool ensureGameCoreLoaded() {
 
 const GameCoreApi& gameCore() {
   return g_api;
+}
+
+const bridge::EngineApi& engineApi() {
+  return g_engineApi;
 }
 
 } // namespace ykkz000::loader

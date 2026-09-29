@@ -4,95 +4,36 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <string>
 #include <vector>
 
 #include <ykkz000/bridge.h>
+#include <ykkz000/civ6/common.h>
+#include <ykkz000/civ6/effect.h>
+#include <ykkz000/civ6/factory.h>
+#include <ykkz000/civ6/handler.h>
 
 namespace ykkz000::loader {
 
-// —— 引擎侧布局（由 GameCore_XP2_FinalRelease.dll 逆向确认），单一事实来源 ——
-// IModifierEffectFactory 工厂对象：+0x00 vtable，+0x08 uint32 类型哈希。
-constexpr std::size_t kFactoryObjectSize = 0x10;
-constexpr std::size_t kFactoryHashOffset = 0x08;
-// 引擎 IModifierEffectFactory 接口宽于 6 槽：实测会在 +0x30（槽 6）上分发。
-// 克隆必须“足够宽且完整复制”，绝不能只复制 6 个，否则越界读到堆垃圾并跳到 0xFFFFFFFF。
-constexpr std::size_t kFactoryVTableSlots = 24;
-constexpr std::size_t kFactoryTypeIdSlot = 1;
-constexpr std::size_t kFactoryTypeNameSlot = 2;
-constexpr std::size_t kFactoryCreateSlot = 5;
+// —— 引擎侧布局 ——
+// 布局的单一事实来源是 <ykkz000/civ6/*.h>：那里以 POD 数据成员 + static_assert
+// 锁定每个已知偏移与大小，并以 vtable 槽位常量取代裸数字。调用点必须引用那里的
+// 类型（offsetof / sizeof / 槽位常量），不得再写字段偏移字面量。
+// 本命名空间只保留“机制常量”（克隆宽度、注册表 kind 等，均非行为策略）。
 
-// MSVC vtable 前置槽：vtable[-1] 为 RTTI/COL 指针，克隆时必须一并复制，
-// 否则新 vptr 前方是 HeapAlloc 块头，引擎 dynamic_cast/typeid/异常展开会把
-// 堆头当指针用而写坏内存。
-constexpr std::size_t kVTableRttiSlots = 1;
-
-// 效果对象（Effects::AdjustCityYieldModifier 等 IModifierEffect 实现）布局：
-// +0x00 vtable，+0x08 YieldType 数组，+0x18 条目数（+0x10 容量），
-// +0x20 Amount 数组，+0x30 数量（+0x28 容量）。克隆槽数需覆盖 Apply/Remove
-// 及析构槽，64 槽远大于实际接口宽度，用于按函数指针定位并替换。
-// 同理加宽：效果对象 vtable 也按“足够宽”克隆，避免同类越界。
+// 克隆宽度（机制常量，非布局）：效果对象 vtable 需覆盖 Apply/Remove 及析构槽，
+// 64 槽远大于实际接口宽度，用于按函数指针定位并替换；handler 描述表取 16 槽留余量。
 constexpr std::size_t kEffectVTableCloneSlots = 64;
-constexpr std::size_t kEffectYieldTypeArrayOffset = 0x08;
-constexpr std::size_t kEffectEntryCountOffset = 0x18;
-constexpr std::size_t kEffectAmountArrayOffset = 0x20;
-constexpr std::size_t kEffectAmountCountOffset = 0x30;
-
-// 运行时防御上限：效果条目数与可信人口范围。条目数骤增或人口离谱通常是
-// self/city 指针无效的症状，此时宁可跳过写入也不要把垃圾地址写坏。
-constexpr int kMaxEffectEntries = 64;
-constexpr int kMaxPlausiblePopulation = 100000;
-
-// City::Instance 人口字段（lGetPopulation / GetYieldFromPopulation 确认）。
-constexpr std::size_t kCityPopulationOffset = 0x268;
-
-// City::Instance 城市 ID（ICity::GetID Lua 绑定读取 +0xA8 确认）。用于识别城市
-// 指针被回收后复用：复用地址上的 ID 与登记时不一致即丢弃旧条目，避免误加到新城市。
-constexpr std::size_t kCityIdOffset = 0xA8;
-
-// —— 效果处理器注册表（handler registry）——
-// 引擎为每个内建效果登记一个运行时 handler（哈希表的节点 +0x18）。自定义 EffectType
-// 必须同样登记：否则引擎解析该效果的行为 handler 时按哈希查到无效节点，解引用得到
-// 地址 0xFFFFFFFF（EXCEPTION_ACCESS_VIOLATION）。
-//
-// 注册表根对象每次游戏上下文构造时由 FUN_1804891b0(root) 建立：
-//   root + 0x00 效果表（kind=2）、root + 0x40 集合表（kind=3）、root + 0x80 需求表。
-// FUN_1806083f0(root, kind, hash, handlerObj) 按哈希设置/替换/移除 handler；
-// 节点中 handler 为首次插入（0x20 字节 {next, prev, hash@+0x10, handler@+0x18}）。
-constexpr int kHandlerKindEffects = 2;
-
-// handler 对象为单指针对象：handler[0] 指向描述表。
-// 描述表槽 0 = analyze、槽 1 = apply（由模板实现与运行期日志确认）。
-constexpr std::size_t kHandlerAnalyzeSlot = 0;
-constexpr std::size_t kHandlerApplySlot = 1;
-// 表槽 4（+0x20）：引擎在关停/替换 handler 时调用 (*handler)[4](handler, 1) 作为释放例程。
-// 自建对象必须覆盖此槽，否则会进入模板释放例程并解引用不存在的对象字段（退出崩溃根因）。
-constexpr std::size_t kHandlerReleaseSlot = 4;
-// 自建 handler 对象分配大小：清零分配，覆盖模板对象字段，避免任何槽读到堆垃圾。
-constexpr std::size_t kHandlerObjectBytes = 0x40;
-// 克隆宽度：足够覆盖引擎会调用的槽（实测用到 0/1 与 +0x30 等，取 16 槽留余量）。
 constexpr std::size_t kHandlerTableCloneSlots = 16;
 
-// 引擎“处理器（handler）”哈希表节点与派发：
-// 节点 0x20 字节：{ next, prev, hash@+0x10, handler@+0x18 }。
-// 派发 thunk（RVA 0x979290）取 handler=*(node+0x18)，再尾调用描述表槽 +0x30（槽 6）。
-constexpr std::size_t kHandlerNodeHashOffset = 0x10;
-constexpr std::size_t kHandlerNodeHandlerOffset = 0x18;
-constexpr std::size_t kHandlerDispatchSlotOffset = 0x30;
-
-// 模板 handler 描述表槽 1（apply）的实参布局（由 FUN_18046b390 反编译确认）：
-//   args + 0x08 = Amount(int)、args + 0x0C = YieldType(int)；
-//   context + 0x70 = City::Instance*。
-constexpr std::size_t kEffectArgsAmountOffset = 0x08;
-constexpr std::size_t kEffectArgsYieldTypeOffset = 0x0C;
-constexpr std::size_t kEffectContextCityOffset = 0x70;
-
-// Registry<T>::GetTypes() 返回的 std::vector 三指针布局。
-constexpr std::size_t kVectorBeginOffset = 0x00;
-constexpr std::size_t kVectorEndOffset = 0x08;
-constexpr std::size_t kVectorCapacityOffset = 0x10;
+// 处理器注册表 kind：效果表（对应 civ6::HandlerRegistryRoot::effects）。
+constexpr int kHandlerKindEffects = 2;
 
 extern HMODULE g_selfModule;
+
+// 引擎内部函数指针类型（仅本 DLL 内部使用）。
+using GetGameManagerFn = void* (*)(); // FUN_180044d60() -> GameManager*
 
 // 真实 GameCore 中被特征扫描解析出的内部入口。
 struct GameCoreApi {
@@ -102,6 +43,14 @@ struct GameCoreApi {
   void*   reserveVector = nullptr;     // std::vector::_Reserve(count) 成员函数
   void*   effectApply = nullptr;       // Effects::AdjustCityYieldModifier::Apply
   void*   effectRemove = nullptr;      // Effects::AdjustCityYieldModifier::Remove
+  // 玩家单位战斗力修正模板（可选：缺失时“每宗主”行为退化为不缩放）。
+  void*   effectStrengthApply = nullptr;  // Effects::AdjustPlayerStrengthModifier::Apply
+  void*   effectStrengthRemove = nullptr; // Effects::AdjustPlayerStrengthModifier::Remove
+  void*   getPlayerByIndex = nullptr;     // 保留：FUN_180044f00(int)（无边界检查，不用）
+  void*   getGameManager = nullptr;       // FUN_180044d60() -> GameManager*
+  void*   strengthAccumulate = nullptr;   // FUN_180944040(target, playerId, amount)：引擎把
+                                          // 战斗力修正落到玩家桶的写入点；playerId 是引擎
+                                          // 自己解析出的权威玩家标识
   void*   changeYieldModifier = nullptr; // City::Instance::ChangeYieldModifier(YieldTypes, int)
   void*   changePopulation = nullptr;  // City::Instance::ChangePopulation(int delta)
   // 处理器注册：handlerRegistryInit/setEffectHandler/handlerNodeInsert 为代码；后两者指向引擎数据。
@@ -123,6 +72,8 @@ struct GameCoreApi {
 [[nodiscard]] std::wstring moduleDirectory();
 [[nodiscard]] bool ensureGameCoreLoaded();
 [[nodiscard]] const GameCoreApi& gameCore();
+// 引擎入口集合（在 gameCore 解析成功后填充；未经解析时字段为 null）。
+[[nodiscard]] const bridge::EngineApi& engineApi();
 
 [[nodiscard]] std::uint32_t makeHash(const char* text);
 void logMessage(int level, const char* message);
@@ -150,15 +101,106 @@ class LogScope {
 // 不依赖已可能卸载的插件模块）。
 struct RegisteredEffect {
   std::uint32_t hash = 0;
+  std::uint32_t templateHash = 0;
   std::string typeName;
-  bridge::EffectBehavior behavior = bridge::EffectBehavior::kInherit;
 };
 [[nodiscard]] std::vector<RegisteredEffect> registeredEffects();
+// 判定给定哈希是否为某个已注册自定义效果所复用的模板效果哈希（供 handler
+// 节点捕获时按模板分别记录）。
+[[nodiscard]] bool isRegisteredTemplateHash(std::uint32_t hash);
+// 判定给定哈希是否为某个已注册自定义效果本身的类型哈希（工厂对象 +0x08），用于在
+// 模板 Create 旁路诊断中区分“引擎内置对象”与“我们克隆出的对象”。
+[[nodiscard]] bool isRegisteredHash(std::uint32_t typeHash);
+
+// hook_service.cpp：进程内唯一 MinHook 实例的初始化入口（幂等），供 Loader 自身
+// 的机制 hook 与插件 hook 服务共用。
+[[nodiscard]] bool ensureHookServiceInitialized();
+
+// hook_service.cpp：Loaders 自身的机制 hook（无归属登记，不随插件卸载撤销）。
+int installHookRaw(void* target, void* detour, void** original);
+int removeHookRaw(void* target);
+
+// hook_service.cpp：插件 hook 服务，按 pluginHandle 登记归属。
+int serviceInstallHook(void* pluginHandle, void* target, void* detour, void** original);
+int serviceRemoveHook(void* pluginHandle, void* target);
+// 兜底撤销：移除该插件登记但尚未撤销的全部 hook。
+void removeHooksForPlugin(void* pluginHandle);
+// 调用期批次：registerEffectType 调用插件 prepare 前开启、调用后关闭；rollback 为真时
+// 移除批次内新建的全部 hook（prepare 失败的兜底，主责仍是插件自行撤销）。
+void beginHookScope();
+void endHookScope(bool rollback);
+
+// memory_probe.cpp
+// 判定 [address, address+bytes) 是否落在已提交且可读的内存区域。
+[[nodiscard]] bool isReadableRegion(const void* address, std::size_t bytes);
+// 判定指针是否像一个可解引用的对象（非低地址、8 字节对齐、首指针可读）。
+[[nodiscard]] bool isCandidateObject(const void* pointer);
+
+// 只有通过 isReadableRegion 校验才读取字段；失败返回 false 且不改动 out。
+template <typename T>
+[[nodiscard]] bool tryReadField(const void* base, std::size_t offset, T& out) {
+  if (base == nullptr) {
+    return false;
+  }
+  const auto* address = static_cast<const std::uint8_t*>(base) + offset;
+  if (!isReadableRegion(address, sizeof(T))) {
+    return false;
+  }
+  std::memcpy(&out, address, sizeof(T));
+  return true;
+}
+
+// —— 成员访问层：把“成员引用”翻译成偏移 ——
+// 调用点用 (&civ6::X::field) 表达字段，偏移由 <ykkz000/civ6/*.h> 的布局决定；
+// 引擎指针仍先经 isReadableRegion 校验，未通过则不改动内存。
+
+// 由成员指针取字段偏移。以对齐的静态哑对象为基准取成员地址，避免对空指针取址；
+// 全程只做地址相减，不读取任何成员。
+template <class TObj, class TField>
+[[nodiscard]] std::size_t MemberOffset(TField TObj::* member) {
+  static const TObj kDummy{};
+  const auto base = reinterpret_cast<std::uintptr_t>(&kDummy);
+  const auto field = reinterpret_cast<std::uintptr_t>(&(kDummy.*member));
+  return static_cast<std::size_t>(field - base);
+}
+
+// 校验可读后读取成员字段；失败返回 false 且不改动 out。
+template <class TObj, class TField>
+[[nodiscard]] bool TryRead(const void* base, TField TObj::* member, TField& out) {
+  return tryReadField(base, MemberOffset(member), out);
+}
+
+// 校验可读后读取成员字段，失败返回 fallback。
+template <class TObj, class TField>
+[[nodiscard]] TField TryReadOr(const void* base, TField TObj::* member, TField fallback) {
+  TField value = fallback;
+  (void)TryRead(base, member, value);
+  return value;
+}
+
+// 校验可读后写入成员字段；失败返回 false 且不改动内存。
+template <class TObj, class TField>
+bool TryWrite(void* base, TField TObj::* member, const TField& value) {
+  if (base == nullptr) {
+    return false;
+  }
+  auto* address = static_cast<std::uint8_t*>(base) + MemberOffset(member);
+  if (!isReadableRegion(address, sizeof(TField))) {
+    return false;
+  }
+  std::memcpy(address, &value, sizeof(TField));
+  return true;
+}
 
 // crash_capture.cpp：安装崩溃现场抓取（VEH）；幂等。
 void installCrashCapture();
 // 反安装崩溃抓取：移除 VEH，避免 DLL 卸载后 VEH 指向已卸载代码。
 void uninstallCrashCapture();
+
+// crash_capture.cpp：本线程是否正在执行一次受 SEH 保护的引擎/插件调用。VEH 看到该
+// 标志时直接放行（EXCEPTION_CONTINUE_SEARCH），让受保护调用的 __except 接管，避免把
+// 可恢复的探测性异常当成致命崩溃写进 YKKZ000_crash.log。
+extern thread_local bool g_guardedCallActive;
 
 // effect_handler.cpp
 [[nodiscard]] bool installEffectHandlerHook();
@@ -166,36 +208,48 @@ void uninstallEffectHandlerHook();
 // 移除本模组登记过的 handler 节点（在转发真实 DllDestroyGameContext 之前调用，
 // 此时 root 仍有效）。请勿在其它时机调用。
 void removeCustomEffectHandlers();
+// 卸载兜底：清空该插件在 handler 克隆表里登记的 analyze/handlerApply 回调，
+// 避免插件卸载后仍有 handler 调用跳进已卸载内存。
+void clearHandlerCallbacksForPlugin(void* pluginHandle);
 
 // vtable_clone.cpp
 [[nodiscard]] void* cloneFactoryVTable(void* templateFactory);
 void rememberTypeName(std::uint32_t typeHash, const char* typeName);
+// 注册失败回滚：移除某 hash 的类型名记录（GetTypeName 槽随后返回空串）。
+void forgetTypeName(std::uint32_t typeHash);
 
-// custom_effect.cpp
-int registerEffectBehavior(std::uint32_t typeHash, bridge::EffectBehavior behavior,
-                           void* originalCreate);
-void* patchEffectObjectVTable(void* effectObject, std::uint32_t typeHash);
+// effect_mechanism.cpp
+// 已登记的插件实现（impl 为拷贝，含归属句柄；originalCreate 为模板工厂 Create）。
+struct EffectRecord {
+  bridge::EffectImpl impl{};
+  void* originalCreate = nullptr;
+  void* pluginHandle = nullptr;
+};
+// 按自定义 EffectType 哈希取实现记录（不存在返回 false）。
+[[nodiscard]] bool findEffectRecord(std::uint32_t typeHash, EffectRecord& out);
+// 登记/刷新某 EffectType 的实现与模板 Create（同一哈希重复调用为刷新）。
+int registerEffectImpl(std::uint32_t typeHash, const bridge::EffectImpl* impl,
+                       void* originalCreate);
+// 注册失败回滚：移除某 EffectType 的实现记录（不存在返回非 0）。
+int unregisterEffectImpl(std::uint32_t typeHash);
+// 克隆效果对象 vtable 并按记录里的 template/impl 函数指针替换 Apply/Remove 槽。
+[[nodiscard]] void* patchEffectObjectSlots(void* effectObject, std::uint32_t typeHash);
 [[nodiscard]] void* customFactoryCreateEntry();
-
-// 每人口效果的城市累计记录：Apply/Remove 时登记与注销，人口变化时按增量补正。
-// appliedPopulation 为该条目当前已应用的人口基准，(amount × appliedPopulation)
-// 恒等于已写入城市的累计修正；Remove 据此精确回退（即使人口 hook 未安装）。
-void rememberAppliedCityModifier(void* city, int yieldType, int amount, int appliedPopulation);
-[[nodiscard]] bool forgetAppliedCityModifier(void* city, int yieldType, int amount,
-                                             int& appliedTotal);
-void adjustAppliedCityPopulation(void* city);
-void clearAppliedCityModifiers();
-
-// custom_effect.cpp：已注册每人口行为时确保 hook 已安装（用于新建游戏上下文时重新启用）。
-bool installPopulationHookIfNeeded();
-
-// population_hook.cpp
-[[nodiscard]] bool installPopulationHook();
-void uninstallPopulationHook();
+// 插件可选的单槽替换服务（bridge::SlotPatchFn 实现）：仅在 Loader 已安装的克隆块
+// 上就地替换，拒绝修改引擎共享的静态 vtable。
+int hostPatchEffectSlot(void* pluginHandle, void* object, const void* expectedFn,
+                        void* replacement, const char* label);
+// 卸载兜底：把该插件替换过的效果对象槽还原为模板函数，并清空其实现回调指针。
+void teardownPluginEffects(void* pluginHandle);
 
 // plugin_manager.cpp
 void loadPlugins(bridge::Host* host);
 void unloadPlugins();
+// 当前正在加载的插件句柄（仅在 GetPlugin 调用期间设置，供注册归属使用）。
+void setActivePluginHandle(void* pluginHandle);
+[[nodiscard]] void* activePluginHandle();
+// 向所有已加载插件广播上下文生命周期事件。
+void notifyPluginsGameContext(bridge::GameContextEvent event, void* context);
 
 // proxy.cpp
 void initializeLoaderOnce();

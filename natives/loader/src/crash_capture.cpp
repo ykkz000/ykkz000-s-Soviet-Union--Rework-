@@ -15,6 +15,12 @@
 // —— 崩溃现场抓取（VEH）——
 // 要求：不依赖堆、不依赖调试器；只追加写一个小文件。
 namespace ykkz000::loader {
+
+// 本线程是否正在执行一次受 SEH 保护的引擎调用。VEH 据此静默放行可恢复异常，交给
+// 该调用的 __except 接管，避免把探测性访问违例当成致命崩溃写进 YKKZ000_crash.log。
+// 当前无使用者（宗主数改为纯内存遍历），保留供日后加入不可信引擎调用时复用。
+thread_local bool g_guardedCallActive = false;
+
 namespace {
 
 constexpr std::size_t kMaxPathChars = 512;
@@ -158,6 +164,10 @@ LONG CALLBACK CrashCapture_Handler(PEXCEPTION_POINTERS info) {
   static thread_local bool inHandler = false;
   if (inHandler || info == nullptr || info->ExceptionRecord == nullptr ||
       info->ContextRecord == nullptr) {
+    return EXCEPTION_CONTINUE_SEARCH;
+  }
+  // 受 SEH 保护的探测调用：不记录、不拦截，放行给该调用的 __except。
+  if (g_guardedCallActive) {
     return EXCEPTION_CONTINUE_SEARCH;
   }
   // 只关心“真崩溃”类异常，避免把正常 SEH/断点刷满日志

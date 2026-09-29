@@ -27,8 +27,7 @@ extern "C" const char* ykkz000_GetTypeName(void* self) {
   if (self == nullptr) {
     return "";
   }
-  const auto hash = *reinterpret_cast<const std::uint32_t*>(
-      static_cast<const std::uint8_t*>(self) + kFactoryHashOffset);
+  const auto hash = TryReadOr(self, &civ6::ModifierEffectFactory::type_hash, std::uint32_t{0});
   static std::atomic<bool> s_logged{false};
   if (!s_logged.exchange(true)) {
     logMessageF(1, "getname: first call self=%p hash=0x%08X", self, hash);
@@ -47,6 +46,11 @@ void rememberTypeName(std::uint32_t typeHash, const char* typeName) {
   g_typeNames.emplace(typeHash, std::string(typeName));
 }
 
+void forgetTypeName(std::uint32_t typeHash) {
+  std::lock_guard<std::mutex> guard(g_typeNamesMutex);
+  g_typeNames.erase(typeHash);
+}
+
 void* cloneFactoryVTable(void* templateFactory) {
   if (templateFactory == nullptr) {
     return nullptr;
@@ -56,20 +60,20 @@ void* cloneFactoryVTable(void* templateFactory) {
     return nullptr;
   }
   logMessageF(1, "clone: template=%p source vtable=%p slots=%zu", templateFactory, source,
-              kFactoryVTableSlots);
-  const std::size_t slots = kFactoryVTableSlots;
+              civ6::kFactoryVTableSlots);
+  const std::size_t slots = civ6::kFactoryVTableSlots;
   auto* block = static_cast<void**>(
-      HeapAlloc(GetProcessHeap(), 0, sizeof(void*) * (slots + kVTableRttiSlots)));
+      HeapAlloc(GetProcessHeap(), 0, sizeof(void*) * (slots + civ6::kVTableRttiPrefixSlots)));
   if (block == nullptr) {
     return nullptr;
   }
   block[0] = source[-1]; // MSVC 的 RTTI/COL 指针，必须一并保留
-  std::memcpy(block + kVTableRttiSlots, source, sizeof(void*) * slots);
+  std::memcpy(block + civ6::kVTableRttiPrefixSlots, source, sizeof(void*) * slots);
 
-  void** vtable = block + kVTableRttiSlots; // 交回引擎与调用方的 vptr
-  vtable[kFactoryTypeNameSlot] = reinterpret_cast<void*>(&ykkz000_GetTypeName);
+  void** vtable = block + civ6::kVTableRttiPrefixSlots; // 交回引擎与调用方的 vptr
+  vtable[civ6::kFactoryTypeNameSlot] = reinterpret_cast<void*>(&ykkz000_GetTypeName);
   logMessageF(1, "clone: block=%p vtable=%p nameSlot=%zX rtti=%p", block, vtable,
-              kFactoryTypeNameSlot, block[0]);
+              civ6::kFactoryTypeNameSlot, block[0]);
   return vtable;
 }
 
