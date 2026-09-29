@@ -34,6 +34,9 @@ StrengthAccumulateFn kAccumulateOriginal = nullptr;
 void* kAccumulateTarget = nullptr;
 bool kAccumulateInstalled = false;
 
+// 命中日志计数：仅前 16 条与每 4096 条打印一次，避免逐次写入刷屏。
+std::atomic<long> kApplyLogCount{0};
+
 // 本线程是否正在执行我们效果对象的模板 Apply（非空即该 self）；以及本次 Apply 窗口
 // 内累计的 (scaled - original) 与落到写入点的次数。
 thread_local void* kApplyActive = nullptr;
@@ -99,8 +102,11 @@ void StrengthAccumulate_Hook(civ6::GameEffects::ProposedCombat* target, int play
     }
   }
   kScaledDelta += static_cast<int>(scaled) - amount;
-  LogF(1, "strength: hook playerId=%d amount=%d->%d suzerains=%d", player_id, amount,
-       static_cast<int>(scaled), count);
+  const long hit = ++kApplyLogCount;
+  if (hit <= 16 || (hit % 4096) == 0) {
+    LogF(2, "strength: hook playerId=%d amount=%d->%d suzerains=%d", player_id, amount,
+         static_cast<int>(scaled), count);
+  }
   kAccumulateOriginal(target, player_id, static_cast<int>(scaled));
 }
 

@@ -7,7 +7,7 @@
 // 仅使用 POD、函数指针与 const char*；不跨 DLL 传递 std:: 对象或异常。
 namespace ykkz000::bridge {
 
-inline constexpr std::uint32_t kHostApiVersion = 8;
+inline constexpr std::uint32_t kHostApiVersion = 9;
 
 struct Host;
 
@@ -67,8 +67,6 @@ struct EngineApi {
   void* effectStrengthRemove;
   void* proposedCombatAdjust; // 战斗力修正写入点（playerId 权威来源）
   void* changeYieldModifier;  // City::Instance::ChangeYieldModifier(YieldType, int)
-  void* changePopulation;     // City::Instance::ChangePopulation(int delta)（已弃用：读取
-                              // 路径改为 cityCalculateYield 注入，此字段仅为 ABI 兼容保留）
   void* getPlayer;            // PlayerTypes → Player::Instance*（无边界检查）
   void* getGameManager;       // → GameManager*（+0x50 为玩家向量）
 
@@ -79,8 +77,9 @@ struct EngineApi {
   void* cityCalculateYield;
 
   // —— v8 新增（只追加）——
-  // TrackedValue::AddStep(this, step, u32, u32) —— 修正明细追加入口。step 结构与 tooltip
-  // 键的参数约定尚未确认，暂不用于逻辑（读取路径直接累加修正累计 +0x40）。
+  // TrackedValue::AddStep(this=修正子对象(out+0x30), step, u32=0, u32=0, const char*
+  // tooltipKey)：修正明细追加入口。step 与 sub-object 同构（civ6::YieldValue：has_min/
+  // min/has_max/max/value/flag/steps，0x30 字节），引擎只写 value 并把其余字段清零。
   void* trackedValueAddStep;
 };
 
@@ -95,10 +94,6 @@ struct EngineApi {
 // “已安装/已停用”属成功语义，绝不能作为失败处理——否则插件会清空仍然生效的跳板。
 using HookInstallFn = int (*)(void* pluginHandle, void* target, void* detour, void** original);
 using HookRemoveFn  = int (*)(void* pluginHandle, void* target);
-
-// 效果对象 vtable 槽替换（克隆块由 Loader 持有并登记归属）。返回 0 表示成功。
-using SlotPatchFn = int (*)(void* pluginHandle, void* object, const void* expectedFn,
-                            void* replacement, const char* label);
 
 // 受校验的内存读写：以“偏移 + 字节数”表达，避免跨 DLL 传递类型信息。
 // 成功返回 1，失败返回 0 且不改动 out/in。
@@ -130,7 +125,6 @@ struct Host {
   const EngineApi*     engine;
   HookInstallFn        installHook;
   HookRemoveFn         removeHook;
-  SlotPatchFn          patchEffectSlot;
   ReadFieldFn          readField;
   WriteFieldFn         writeField;
   IsCandidateFn        isCandidateObject;

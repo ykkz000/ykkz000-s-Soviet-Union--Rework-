@@ -52,11 +52,11 @@ struct GameCoreApi {
                                           // 战斗力修正落到玩家桶的写入点；playerId 是引擎
                                           // 自己解析出的权威玩家标识
   void*   changeYieldModifier = nullptr; // City::Instance::ChangeYieldModifier(YieldTypes, int)
-  void*   changePopulation = nullptr;  // City::Instance::ChangePopulation(int delta)
   // 城市产出读取路径（可选：缺失时“每市民百分比”效果退化为不缩放）。
   // City::Instance::CalculateYield(YieldTypes, TypeHash, bool) -> TrackedValue（sret）。
   void*   cityCalculateYield = nullptr;
-  // TrackedValue::AddStep(this, step, u32, u32)：修正明细追加入口（可选，参数约定待确认）。
+  // TrackedValue::AddStep(this=修正子对象, step, u32=0, u32=0, tooltipKey)：修正明细
+  // 追加入口（step 布局见 civ6::YieldValue，第 5 实参在栈上传入本地化键）。
   void*   trackedValueAddStep = nullptr;
   // 处理器注册：handlerRegistryInit/setEffectHandler/handlerNodeInsert 为代码；后两者指向引擎数据。
   void*   handlerRegistryInit = nullptr;   // FUN_1804891b0(root)：建立内建 handler 表
@@ -240,10 +240,6 @@ int unregisterEffectImpl(std::uint32_t typeHash);
 // 克隆效果对象 vtable 并按记录里的 template/impl 函数指针替换 Apply/Remove 槽。
 [[nodiscard]] void* patchEffectObjectSlots(void* effectObject, std::uint32_t typeHash);
 [[nodiscard]] void* customFactoryCreateEntry();
-// 插件可选的单槽替换服务（bridge::SlotPatchFn 实现）：仅在 Loader 已安装的克隆块
-// 上就地替换，拒绝修改引擎共享的静态 vtable。
-int hostPatchEffectSlot(void* pluginHandle, void* object, const void* expectedFn,
-                        void* replacement, const char* label);
 // 卸载兜底：把该插件替换过的效果对象槽还原为模板函数，并清空其实现回调指针。
 void teardownPluginEffects(void* pluginHandle);
 

@@ -6,6 +6,24 @@
 
 namespace ykkz000::civ6 {
 
+// 引擎的城市产出缓存条目（`City::Instance::yield_cache` 指向的数据，每条目 8 字节，
+// 按 YieldType 索引）。
+//
+// 证据（发布镜像 FUN_1801332F0，即 CalculateYield 的调用者）：
+//   entry = *(longlong*)(city + 0x1950) + yield * 8;
+//   if (*(char*)(entry + 4) == 0) { CalculateYield(...); *entry = combine(...);
+//                                   *(char*)(entry + 4) = 1; }  // 重算并置有效
+//   *out = *entry;                                              // 命中即用旧值
+// 即 valid == 0 时才重算，valid != 0 时直接返回缓存值。本模组的侧表（叠加数据）变化
+// 不会清这个标志，故 Apply/Remove 必须主动清 valid 迫使重算。
+struct YieldCacheEntry {
+  std::int32_t value;      // 0x00: 缓存值（引擎重算时写回）
+  std::uint8_t valid;      // 0x04: 有效标志（0 = 下次读取需重算）
+  std::uint8_t pad_0x05[3];
+};
+
+static_assert(sizeof(YieldCacheEntry) == 8);
+
 // 引擎 GameCore::City::Instance。
 //
 // 仅描述布局，不含任何本模组叠加数据（叠加数据见 extra/）。每个已知字段以
@@ -78,6 +96,14 @@ struct City {
     std::uint8_t unknown_0x6a4[4];               // 0x6A4..0x6A7
     std::int32_t per_population_yields_fallback; // 0x6A8
     std::uint8_t unknown_0x6ac[4];               // 0x6AC..0x6AF: 尾部对齐
+
+    // —— 城市产出缓存（0x1950）——
+    // 证据（发布镜像 FUN_1801332F0）：entry = *(longlong*)(city+0x1950) + yield*8；
+    //   valid 在 entry+4，valid == 0 时引擎调用 CalculateYield 重算并写回 value（+0）
+    //   后置 1，否则直接返回缓存值。侧表变化需清 valid（见 YieldCacheEntry 注释）。
+    //   FUN_180951550()+0x2A0 == 0 时引擎为“无缓存”模式（总是重算），此时失效无害。
+    std::uint8_t unknown_0x6b0[0x1950 - 0x6b0]; // 0x6B0..0x194F: 未知
+    void* yield_cache;                          // 0x1950: YieldCacheEntry 向量数据
   };
 };
 
@@ -97,5 +123,6 @@ static_assert(offsetof(City::Instance, flat_yields_0x540_fallback) == 0x558);
 static_assert(offsetof(City::Instance, per_population_yields_data) == 0x690);
 static_assert(offsetof(City::Instance, per_population_yields_count) == 0x6a0);
 static_assert(offsetof(City::Instance, per_population_yields_fallback) == 0x6a8);
+static_assert(offsetof(City::Instance, yield_cache) == 0x1950);
 
 } // namespace ykkz000::civ6

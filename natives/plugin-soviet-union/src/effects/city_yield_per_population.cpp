@@ -19,15 +19,20 @@
 //
 // 思路：Apply/Remove 只把“每市民百分比”聚合进 CityExtra 侧表（键 = city_id + owner），
 // 真正的“乘人口”发生在引擎的产出读取路径 City::Instance::CalculateYield 上——
-// 返回前向本次返回对象的修正子对象追加 (percent[yield] * population) >> 8。
+// 返回前按引擎自己的方式追加一条修正步：TrackedValue::AddStep(out+0x30, step, 0, 0,
+// tooltipKey)，step.value = (percent[yield] * population) >> 8。
 // 因此人口变化、产出重算天然使用最新人口，无需 ChangePopulation hook，也无
 // “已应用人口基准”记账；同参数重复实例只是对称的 += / -=，无歧义、无漂移。
 //
 // 注入点（发布构建 RVA 0x12FF20）：
 //   TrackedValue* City::Instance::CalculateYield(City* this, TrackedValue* out,
-//                                                int yield, int typeHash, bool flag)
+//                                                int yield, int typeHash, bool record_steps)
 //   out 为 sret（函数写它并以 RAX 返回）：基础累计 out+0x10；修正子对象 out+0x30，
-//   其累计值 out+0x40（FixedPoint<8>，1.0 == +1%，最终产出 = base * (1 + modifier / 25600)）。
+//   其累计值 out+0x40（FixedPoint<8>，256 == +1%，最终产出 = base * (1 + modifier / 25600)）。
+//
+// 用 AddStep 而非直接写 out+0x40：数值与明细同源，引擎在 record_steps 的读取路径
+// （发布 FUN_180132B60，城市产出明细面板）会把整份 TrackedValue 连同明细步搬走，
+// 故我们这条修正会出现在面板明细里；直接写累计则只有数字、没有明细行。
 namespace ykkz000::plugin {
 namespace {
 
@@ -44,12 +49,28 @@ constexpr std::int32_t kPercentUnit = 0x10000;
 // 单条 Amount 的合理上限（防御解析错误导致的异常值）。
 constexpr int kMaxPlausibleAmount = 100000;
 
-// CalculateYield 返回对象（TrackedValue）中修正累计值的偏移。
-constexpr std::size_t kModifierAccumulatedOffset =
-    offsetof(civ6::TrackedValue, modifier_accumulated);
+// CalculateYield 返回对象（TrackedValue）内的偏移：修正子对象与其内累计值。
+constexpr std::size_t kModifierPartOffset = offsetof(civ6::TrackedValue, modifier);
+constexpr std::size_t kValueOffset = offsetof(civ6::YieldValue, value);
+constexpr std::size_t kModifierAccumulatedOffset = kModifierPartOffset + kValueOffset;
 
 using CalculateYieldFn = void* (*)(void* city, void* out, int yield, int type_hash,
-                                   bool flag);
+                                   bool record_steps);
+
+// 引擎自身入口 TrackedValue::AddStep（发布 RVA 0x12FC10）：把一条修正并入修正子对象
+// 的累计值，并在 record_steps 时落一条带 tooltip 键的明细。第 3/4 实参为引擎固定传入
+// 的 0（见便捷重载 0x12FCE0），第 5 实参在栈上传入本地化键。
+using AddStepFn = void (*)(void* modifier_part, civ6::YieldValue* step, std::uint32_t arg3,
+                           std::uint32_t arg4, const char* tooltip_key);
+
+// 复用引擎 game effects 修正的同一 tooltip 键：无需新增本地化文本，且明细行语义正确
+// （本效果本就是一类城市产出修正）。
+constexpr char kModifierTooltipKey[] =
+    "LOC_CITY_YIELD_FROM_MODIFIER_GAMEEFFECTS_TOOLTIP";
+
+// 引擎自身入口 City::Instance::ChangeYieldModifier(YieldTypes, int)（发布 RVA 0x131CF0）。
+// 以 0 增量调用不改数值数组，但会走引擎的“产出已变化”通知/失效分发（0x5FB890）。
+using ChangeYieldModifierFn = void (*)(void* city, int yield, int delta);
 
 std::mutex kHookMutex;
 CalculateYieldFn kCalculateYieldOriginal = nullptr;
@@ -168,6 +189,38 @@ void ApplyEntries(void* self, void* city, int sign) {
       }
     }
   });
+  // 侧表变化后失效引擎的城市产出缓存，并发送一条 0 增量的“产出已变化”通知。
+  //
+  // 引擎的产出读取路径（发布 FUN_1801332F0）缓存 (city, yield) 的计算结果
+  // （city+0x1950，每条目 8 字节，+4 为有效标志）；侧表变化不会清该标志，不失效
+  // 则面板/结算继续用旧值。这里只清有效标志、不写数值：重算由引擎在下次读取时
+  // 自行完成（经过本模块的 CalculateYield hook），避免出现“两份真相”。
+  // 幂等：重复 Apply/Remove 只是重复清零。必须在 Apply/Remove 做，绝不能放进
+  // CalculateYield hook（否则每次读取都触发重算/通知）。
+  void* cache = nullptr;
+  const bool has_cache =
+      TryRead(city, &civ6::City::Instance::yield_cache, cache) && cache != nullptr;
+  const bridge::EngineApi* engine = Context().engine;
+  const auto change =
+      engine != nullptr && engine->changeYieldModifier != nullptr
+          ? reinterpret_cast<ChangeYieldModifierFn>(engine->changeYieldModifier)
+          : nullptr;
+  for (const EffectEntry& entry : entries) {
+    if (entry.yield_type < 0 ||
+        entry.yield_type >= static_cast<int>(civ6::kMaxYields)) {
+      continue;
+    }
+    if (has_cache) {
+      const std::size_t offset =
+          offsetof(civ6::YieldCacheEntry, valid) +
+          static_cast<std::size_t>(entry.yield_type) * sizeof(civ6::YieldCacheEntry);
+      const std::uint8_t invalid = 0;
+      (void)TryWriteAt(cache, offset, invalid);
+    }
+    if (change != nullptr) {
+      change(city, entry.yield_type, 0);
+    }
+  }
   if (sign < 0) {
     extra::CityExtras().EraseIfEmpty(key);
   }
@@ -193,23 +246,19 @@ const extra::CityExtra* LookupExtra(const extra::CityKey& key) {
   return &kCache.extra;
 }
 
-// 命中计数：首调用记录值域自检；长期 0 命中给一次 level-0 告警（避免静默失效）。
+// 命中计数：长期 0 命中给一次 level-0 告警（避免静默失效）。
 std::atomic<long> kCallCount{0};
 std::atomic<long> kHitCount{0};
 
-void LogFirstCall(void* out, void* city, int yield, int population, std::int32_t base,
-                  std::int32_t modifier) {
-  static std::atomic<bool> kLogged{false};
-  if (kLogged.exchange(true)) {
-    return;
-  }
-  LogF(1,
-       "city-yield: first CalculateYield out=%p city=%p yield=%d pop=%d base(+0x10)=%d "
-       "modifier(+0x40)=%d",
-       out, city, yield, population, base, modifier);
+// 命中探针：限流打印关键量，便于判定“数值是否进入引擎”。
+void LogHit(const extra::CityKey& key, int yield, int population, std::int64_t delta,
+            long hit) {
+  LogF(2, "city-yield: hit#%ld yield=%d pop=%d owner=%d delta=%lld", hit, yield, population,
+       key.owner_id, static_cast<long long>(delta));
 }
 
-void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash, bool flag) {
+void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
+                          bool record_steps) {
   if (kCalculateYieldOriginal == nullptr) {
     // 已启用但跳板为空：引擎产出读取会被吞掉。正常不应出现；一旦出现必须可见。
     static std::atomic<bool> kLoggedNoTrampoline{false};
@@ -218,24 +267,13 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash, bool 
     }
     return out;
   }
-  void* returned = kCalculateYieldOriginal(city, out, yield, type_hash, flag);
+  void* returned = kCalculateYieldOriginal(city, out, yield, type_hash, record_steps);
   if (city == nullptr || returned == nullptr ||
       yield < 0 || yield >= static_cast<int>(civ6::kMaxYields)) {
     return returned;
   }
 
   const long call = ++kCallCount;
-  if (call == 1) {
-    // 首调用 dry-run 自检：只记录返回对象 +0x10/+0x40 的值域与 yield/人口，便于按实测
-    // 比对确认 TrackedValue 布局（是否要修改由 DryRunEnabled 决定）。
-    std::int32_t first_base = 0;
-    std::int32_t first_modifier = 0;
-    (void)TryReadAt(returned, std::size_t{0x10}, first_base);
-    (void)TryReadAt(returned, kModifierAccumulatedOffset, first_modifier);
-    const std::int32_t first_population =
-        TryReadOr(city, &civ6::City::Instance::population, std::int32_t{-1});
-    LogFirstCall(returned, city, yield, first_population, first_base, first_modifier);
-  }
   // 若已有 Apply（侧表被写过）却始终未命中，说明注入点或键不成立，给一次告警。
   if (call >= 8192 && kHitCount.load(std::memory_order_relaxed) == 0 &&
       kTableGeneration.load(std::memory_order_relaxed) != 0) {
@@ -271,33 +309,57 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash, bool 
 
   const std::int64_t delta = (static_cast<std::int64_t>(percent) * population) >> 8;
   std::int32_t modifier = 0;
-  const bool readable = TryReadAt(returned, kModifierAccumulatedOffset, modifier);
-  if (!readable) {
+  if (!TryReadAt(returned, kModifierAccumulatedOffset, modifier)) {
     return returned;
   }
   if (delta == 0) {
     return returned;
   }
-  const long hit = ++kHitCount;
-  if (hit <= 16 || (hit % 4096) == 0) {
-    LogF(1, "city-yield: +%lld modifier (yield=%d pop=%d city=%p owner=%d hit#%ld)",
-         static_cast<long long>(delta), yield, population, city, key.owner_id, hit);
+  if (delta < std::numeric_limits<std::int32_t>::min() ||
+      delta > std::numeric_limits<std::int32_t>::max()) {
+    return returned; // percent/population 离谱：跳过而不是写入溢出值
   }
+  const long hit = ++kHitCount;
+  const bool log_this = hit <= 16 || (hit % 4096) == 0;
+
   if (DryRunEnabled()) {
     static std::atomic<bool> kLoggedDryRun{false};
     if (!kLoggedDryRun.exchange(true)) {
-      LogF(1, "city-yield: dry-run enabled; would add %lld to +0x40 (was %d)",
-           static_cast<long long>(delta), modifier);
+      LogF(1, "city-yield: dry-run enabled; would add %lld to +0x%zX (was %d)",
+           static_cast<long long>(delta),
+           static_cast<std::size_t>(kModifierAccumulatedOffset), modifier);
+    }
+    if (log_this) {
+      LogHit(key, yield, population, delta, hit);
     }
     return returned;
   }
-  const std::int64_t updated = static_cast<std::int64_t>(modifier) + delta;
-  if (updated < std::numeric_limits<std::int32_t>::min() ||
-      updated > std::numeric_limits<std::int32_t>::max()) {
-    return returned;
+
+  // 首选引擎原生 AddStep：数值并入 modifier.value，record_steps 时同时落一条可见明细，
+  // 与引擎自带的 game effects / 宗教 / 总督头衔等修正完全同构。
+  const bridge::EngineApi* engine = Context().engine;
+  const auto add_step = engine != nullptr && engine->trackedValueAddStep != nullptr
+                            ? reinterpret_cast<AddStepFn>(engine->trackedValueAddStep)
+                            : nullptr;
+  if (add_step != nullptr) {
+    civ6::YieldValue step = {};
+    step.value = static_cast<std::int32_t>(delta);
+    void* const modifier_part =
+        static_cast<std::uint8_t*>(returned) + kModifierPartOffset;
+    add_step(modifier_part, &step, 0, 0, kModifierTooltipKey);
+  } else {
+    // 退化：引擎未暴露 AddStep（旧构建）时直接累加修正累计；无明细行。
+    const std::int64_t updated = static_cast<std::int64_t>(modifier) + delta;
+    if (updated < std::numeric_limits<std::int32_t>::min() ||
+        updated > std::numeric_limits<std::int32_t>::max()) {
+      return returned;
+    }
+    (void)TryWriteAt(returned, kModifierAccumulatedOffset,
+                     static_cast<std::int32_t>(updated));
   }
-  (void)TryWriteAt(returned, kModifierAccumulatedOffset,
-                   static_cast<std::int32_t>(updated));
+  if (log_this) {
+    LogHit(key, yield, population, delta, hit);
+  }
   return returned;
 }
 

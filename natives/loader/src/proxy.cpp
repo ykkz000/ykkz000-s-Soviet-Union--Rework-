@@ -96,7 +96,6 @@ bool initialize() {
     g_host.engine = &engineApi();
     g_host.installHook = &serviceInstallHook;
     g_host.removeHook = &serviceRemoveHook;
-    g_host.patchEffectSlot = &hostPatchEffectSlot;
     g_host.readField = &hostReadField;
     g_host.writeField = &hostWriteField;
     g_host.isCandidateObject = &hostIsCandidateObject;

@@ -37,23 +37,6 @@ struct CloneRecord {
 std::mutex g_cloneMutex;
 std::vector<CloneRecord> g_clones;
 
-// 取已安装到对象上的克隆块（按 vptr 精确匹配）。
-CloneRecord* findCloneLocked(void* object) {
-  if (object == nullptr) {
-    return nullptr;
-  }
-  void** vptr = *reinterpret_cast<void***>(object);
-  if (vptr == nullptr) {
-    return nullptr;
-  }
-  for (CloneRecord& record : g_clones) {
-    if (record.clone == vptr) {
-      return &record;
-    }
-  }
-  return nullptr;
-}
-
 } // namespace
 
 bool findEffectRecord(std::uint32_t typeHash, EffectRecord& out) {
@@ -226,39 +209,6 @@ void teardownPluginEffects(void* pluginHandle) {
     }
   }
   clearHandlerCallbacksForPlugin(pluginHandle);
-}
-
-// 插件可选的单槽替换服务：只允许在 Loader 已安装的克隆块上就地进行，避免在引擎
-// 共享的静态 vtable 上写入。返回 0 表示成功。
-int hostPatchEffectSlot(void* pluginHandle, void* object, const void* expectedFn,
-                        void* replacement, const char* label) {
-  if (object == nullptr || expectedFn == nullptr || replacement == nullptr) {
-    return -1;
-  }
-  std::lock_guard<std::mutex> guard(g_cloneMutex);
-  CloneRecord* record = findCloneLocked(object);
-  if (record == nullptr) {
-    logMessage(0, "slot patch: object vtable is not a loader-owned clone; refused");
-    return -1;
-  }
-  if (pluginHandle != nullptr && record->pluginHandle != nullptr &&
-      record->pluginHandle != pluginHandle) {
-    logMessage(0, "slot patch: clone belongs to another plugin; refused");
-    return -1;
-  }
-  const std::size_t slots = kEffectVTableCloneSlots;
-  for (std::size_t i = 0; i < slots; ++i) {
-    if (record->clone[i] == expectedFn) {
-      record->clone[i] = replacement;
-      record->replaced.emplace_back(i, expectedFn);
-      logMessageF(1, "slot patch: %s slot=%zX object=%p", label != nullptr ? label : "?", i,
-                  object);
-      return 0;
-    }
-  }
-  logMessageF(0, "slot patch: %s expected function not found; refused",
-              label != nullptr ? label : "?");
-  return -1;
 }
 
 } // namespace ykkz000::loader

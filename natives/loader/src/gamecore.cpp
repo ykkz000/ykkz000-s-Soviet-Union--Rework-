@@ -52,9 +52,12 @@ constexpr char kTypesInsertAnchor[] =
 //        缩放；+0x58 按玩家数缩放；+0x5C 已应用总量；玩家身份取 ownerObj+0xD8。
 //      * 0x944040 ProposedCombat::AdjustPlayerStrengthModifier：单位(+0x128==playerId)
 //        或区域(GetOwner()==playerId) 写入 +0x2C，否则写入 +0x30。
-//      * 0x12FC10 TrackedValue::AddStep(this=修正子对象, step, u32, u32)：把一条修正明细
-//        并入 this+0x10（即 TrackedValue+0x40）；step 结构与 tooltip 键的约定待确认，
-//        当前仅暴露入口备查，不用于逻辑（读取路径仍直接累加 +0x40）。
+//      * 0x12FC10 TrackedValue::AddStep(this=修正子对象(out+0x30), step, u32, u32, 栈上的
+//        tooltipKey)：把一条修正明细并入 this+0x10（即 TrackedValue+0x40）。(this+0x14)
+//        非零时同时追加明细条目。step 与子对象同构（0x30 字节：has_min/min/has_max/
+//        max/value/flag(+0x14)/明细向量(+0x18)），引擎以 has_min/has_max/flag=0、只写
+//        value 的方式构造（便捷重载 0x12FCE0 即如此）；tooltipKey 经 Localization::Lookup
+//        取本地化文本。消费方可选（缺失时插件退化为直接累加 +0x40）。
 //      * 0x133780 GetYieldFromPopulation（CalculateYield 0x180130013 处调用）：每人口产出
 //        数组位于 city+0x690/+0x6A0/+0x6A8，单位 FixedPoint<8>。
 //
@@ -75,12 +78,11 @@ struct BuildProfile {
   std::ptrdiff_t rvaGetGameManager;
   std::ptrdiff_t rvaStrengthAccumulate;
   std::ptrdiff_t rvaChangeYieldModifier;
-  std::ptrdiff_t rvaChangePopulation;
   // City::Instance::CalculateYield(YieldTypes, TypeHash, bool) -> TrackedValue（sret）：
   // 城市产出读取路径。发布构建（0x667C6F5B）入口 0x18012FF20 已核验，0xECB 字节。
   std::ptrdiff_t rvaCityCalculateYield;
-  // TrackedValue::AddStep(this, step, u32, u32)：修正明细追加入口。RVA 已核验；step 结构
-  // 与 tooltip 键的参数约定待确认，仅暴露备查（见上方核验记录）。
+  // TrackedValue::AddStep(this, step, u32, u32, tooltipKey)：修正明细追加入口。RVA 已核验；
+  // step 与修正子对象同构（civ6::YieldValue），tooltip 键在栈上传入（见上方核验记录）。
   std::ptrdiff_t rvaTrackedValueAddStep;
   // 处理器注册（handler registry）：前三项为代码；后两项为数据（handler 对象/描述表，
   // 未经运行期校验，仅作诊断）。
@@ -114,9 +116,8 @@ constexpr BuildProfile kKnownXp2Build{
     0x44D60,      // FUN_180044d60() -> GameManager*（+0x50/+0x58 为玩家向量）
     0x944040,     // FUN_180944040(target, playerId, amount)：战斗力修正的写入点
     0x131CF0,     // City::Instance::ChangeYieldModifier(YieldTypes, int)
-    0x131B80,     // City::Instance::ChangePopulation(int delta)
     0x12FF20,     // City::Instance::CalculateYield(YieldTypes, TypeHash, bool) -> TrackedValue
-    0x12FC10,     // TrackedValue::AddStep(this, step, u32, u32)：修正明细追加（参数待确认）
+    0x12FC10,     // TrackedValue::AddStep(this=修正子对象, step, u32, u32, tooltipKey)
     0x4891B0,     // FUN_1804891b0(void* root)：建立内建 handler 注册表
     0x6083F0,     // FUN_1806083f0(root, kind, hash, handlerObj)：设置/替换/移除 handler
     0x489040,     // FUN_180489040(container, outNode, hashPtr)：handler 表插入/查找
@@ -305,7 +306,6 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   resolved.getGameManager = computeRva(kKnownXp2Build.rvaGetGameManager);
   resolved.strengthAccumulate = computeRva(kKnownXp2Build.rvaStrengthAccumulate);
   resolved.changeYieldModifier = computeRva(kKnownXp2Build.rvaChangeYieldModifier);
-  resolved.changePopulation = computeRva(kKnownXp2Build.rvaChangePopulation);
   resolved.cityCalculateYield = computeRva(kKnownXp2Build.rvaCityCalculateYield);
   resolved.trackedValueAddStep = computeRva(kKnownXp2Build.rvaTrackedValueAddStep);
   resolved.handlerRegistryInit = computeRva(kKnownXp2Build.rvaHandlerRegistryInit);
@@ -337,8 +337,6 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
          kKnownXp2Build.rvaStrengthAccumulate);
   logRva("changeYieldModifier", resolved.changeYieldModifier, module,
          kKnownXp2Build.rvaChangeYieldModifier);
-  logRva("changePopulation", resolved.changePopulation, module,
-         kKnownXp2Build.rvaChangePopulation);
   logRva("cityCalculateYield", resolved.cityCalculateYield, module,
          kKnownXp2Build.rvaCityCalculateYield);
   logRva("trackedValueAddStep", resolved.trackedValueAddStep, module,
@@ -356,8 +354,8 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   logRva("templateApply", resolved.templateApply, module, kKnownXp2Build.rvaTemplateApply);
   logRva("effectHandlerDispatch", resolved.effectHandlerDispatch, module,
          kKnownXp2Build.rvaEffectHandlerDispatch);
-  // changePopulation / cityCalculateYield / trackedValueAddStep 不列入致命检查：缺失时插件
-  // 跳过对应 hook/注入，效果优雅降级，而不是让整个 Loader 无法初始化。
+  // cityCalculateYield / trackedValueAddStep 不列入致命检查：缺失时插件跳过对应
+  // hook/注入，效果优雅降级，而不是让整个 Loader 无法初始化。
   if (resolved.getEffectRegistry == nullptr || resolved.mallocTemp == nullptr ||
       resolved.reserveVector == nullptr || resolved.effectApply == nullptr ||
       resolved.effectRemove == nullptr || resolved.changeYieldModifier == nullptr) {
@@ -426,7 +424,6 @@ void publishEngineApi(const GameCoreApi& api) {
   engine.effectStrengthRemove = api.effectStrengthRemove;
   engine.proposedCombatAdjust = api.strengthAccumulate;
   engine.changeYieldModifier = api.changeYieldModifier;
-  engine.changePopulation = api.changePopulation;
   engine.cityCalculateYield = api.cityCalculateYield; // v7 追加
   engine.trackedValueAddStep = api.trackedValueAddStep; // v8 追加
   engine.getPlayer = api.getPlayerByIndex;
