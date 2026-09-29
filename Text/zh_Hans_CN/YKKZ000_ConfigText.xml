@@ -39,7 +39,7 @@
       <Text>各尽所能，按劳分配</Text>
     </Row>
     <Row Tag="LOC_TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK_DESC" Language="zh_Hans_CN">
-      <Text>所有城市每 [ICON_Citizen] 人口提供0.5 [ICON_Production] 生产力以及5% [ICON_Production] 生产力增幅。[NEWLINE]无法建造圣地，无法招募大预言家。</Text>
+      <Text>所有城市每 [ICON_Citizen] 人口提供 0.5 [ICON_Production] 生产力，并每 [ICON_Citizen] 人口提供 +5% [ICON_Production] 生产力增幅。[NEWLINE]无法建造圣地，无法招募大预言家。</Text>
     </Row>
     <Row Tag="LOC_TRAIT_CIVILIZATION_YKKZ000_KOLKHOZ_NAME" Language="zh_Hans_CN">
       <Text>集体农庄</Text>

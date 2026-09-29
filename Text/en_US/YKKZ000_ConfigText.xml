@@ -39,7 +39,7 @@
       <Text>From Each According to His Ability, to Each According To His Work</Text>
     </Row>
     <Row Tag="LOC_TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK_DESC">
-      <Text>Every city gains 0.5 [ICON_Production] Production and 5% [ICON_Production] Production per [ICON_Citizen] Population.[NEWLINE] May not build Holy Site districts, gain Great Prophets, or found Religions.</Text>
+      <Text>Every city gains 0.5 [ICON_Production] Production per [ICON_Citizen] Population, plus +5% [ICON_Production] Production per [ICON_Citizen] Population.[NEWLINE] May not build Holy Site districts, gain Great Prophets, or found Religions.</Text>
     </Row>
     <Row Tag="LOC_TRAIT_CIVILIZATION_YKKZ000_KOLKHOZ_NAME">
       <Text>Kolkhoz</Text>

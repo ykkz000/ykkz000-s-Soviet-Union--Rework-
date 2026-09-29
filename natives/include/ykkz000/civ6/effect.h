@@ -36,21 +36,26 @@ static_assert(offsetof(CityYieldModifierEffect, amount_count) == 0x30);
 // Effects::AdjustPlayerStrengthModifier 的运行时对象（玩家战斗力修正效果）。
 //
 // 该效果不像城市产出模板那样使用数组，而是把参数存为标量：+0x40 Amount（由
-// FUN_1808d5cf0 解析 "Amount" 写入），其后的 0x44..0x58 为其它参数。Apply 把
-// +0x40 累积到玩家效果桶并把已应用总量写入 +0x5C；Remove 直接按 +0x5C 精确回退。
-//
-// 注意：0x44..0x58 的语义尚未逐一确认，按偏移命名并仅用于记录（附 FUN_1808D9110
-// 的使用证据）。本轮不修正命名。
+// FUN_1808d5cf0 解析 "Amount" 写入）。Apply（FUN_1808D9110）的已核验语义：
+//   - +0x44 != 100 时按 powf 指数叠加（叠加计数由 FUN_180951d20 维护）；
+//   - +0x48 为上限（cap）；
+//   - +0x4C 为作用域（域，-1 表示关闭）；
+//   - +0x50 为千分比标量（应用时 ×0x6400）；
+//   - +0x54 按回合/时代缩放百分比（FUN_18063d0e0/FUN_18063d160）；
+//   - +0x58 按玩家数缩放（读 GameManager+0x10D0/+0x10D8）；
+//   - 结果累加进 +0x5C（已应用总量），玩家身份取 ownerObj+0xD8。
+// Remove（FUN_1808DA240）按 +0x5C 精确回退。
+// 注：字段名沿用偏移命名，个别名称的精确语义仍以“未验证”为准。
 struct AdjustPlayerStrengthModifier {
   void** vtable;                               // 0x00: 效果对象 vtable
   std::uint8_t unknown_0x08[0x38];             // 0x08..0x3F: 未知
   std::int32_t amount;                         // 0x40: Amount（解析自 "Amount"）
-  std::int32_t stack_percent_0x44;             // 0x44: StackPercent（语义未验证）
-  std::int32_t cap_0x48;                       // 0x48: 上限/逆向缩放（语义未验证）
-  std::int32_t domain_0x4c;                    // 0x4C: 作用域（语义未验证）
-  std::int32_t scalar_0x50;                    // 0x50: Scalar（语义未验证）
-  std::int32_t advanced_start_multiplier_0x54; // 0x54: AdvancedStartMultiplier（未验证）
-  std::int32_t scale_by_player_count_0x58;     // 0x58: 按玩家数缩放（语义未验证）
+  std::int32_t stack_percent_0x44;             // 0x44: 指数式 StackPercent（!=100 走 powf）
+  std::int32_t cap_0x48;                       // 0x48: 上限/逆向缩放
+  std::int32_t domain_0x4c;                    // 0x4C: 作用域域（-1 关闭）
+  std::int32_t scalar_0x50;                    // 0x50: 千分比标量（应用时 ×0x6400）
+  std::int32_t advanced_start_multiplier_0x54; // 0x54: 按回合/时代缩放百分比
+  std::int32_t scale_by_player_count_0x58;     // 0x58: 按玩家数缩放
   std::int32_t applied_total;                  // 0x5C: 已应用总量（预览与精确回退来源）
 };
 

@@ -7,7 +7,7 @@
 // 仅使用 POD、函数指针与 const char*；不跨 DLL 传递 std:: 对象或异常。
 namespace ykkz000::bridge {
 
-inline constexpr std::uint32_t kHostApiVersion = 6;
+inline constexpr std::uint32_t kHostApiVersion = 8;
 
 struct Host;
 
@@ -67,9 +67,21 @@ struct EngineApi {
   void* effectStrengthRemove;
   void* proposedCombatAdjust; // 战斗力修正写入点（playerId 权威来源）
   void* changeYieldModifier;  // City::Instance::ChangeYieldModifier(YieldType, int)
-  void* changePopulation;     // City::Instance::ChangePopulation(int delta)
+  void* changePopulation;     // City::Instance::ChangePopulation(int delta)（已弃用：读取
+                              // 路径改为 cityCalculateYield 注入，此字段仅为 ABI 兼容保留）
   void* getPlayer;            // PlayerTypes → Player::Instance*（无边界检查）
   void* getGameManager;       // → GameManager*（+0x50 为玩家向量）
+
+  // —— v7 新增（只追加）——
+  // City::Instance::CalculateYield(YieldTypes, TypeHash, bool) —— 城市产出读取路径。
+  // 返回 TrackedValue（隐藏 sret：rcx=sret, rdx=city, r8=yield, r9=typeHash, 栈=flag）。
+  // 基础累计在 sret+0x10，修正子对象在 sret+0x30（修正累计在 sret+0x40）。
+  void* cityCalculateYield;
+
+  // —— v8 新增（只追加）——
+  // TrackedValue::AddStep(this, step, u32, u32) —— 修正明细追加入口。step 结构与 tooltip
+  // 键的参数约定尚未确认，暂不用于逻辑（读取路径直接累加修正累计 +0x40）。
+  void* trackedValueAddStep;
 };
 
 // MinHook 服务：全进程唯一实例由 Loader 的 hook_service 持有。插件禁止自行链接

@@ -39,11 +39,13 @@
     <Row TraitType="TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK" ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_MODIFIER_PER_POPULATION" />
   </TraitModifiers>
   <Modifiers>
-    <!-- Statically bound via TraitModifiers: +0.5 Production per citizen (built-in effect). -->
+    <!-- Statically bound via TraitModifiers: +0.5 Production per citizen (built-in effect,
+         a flat amount per citizen). -->
     <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_PER_POPULATION" ModifierType="MODIFIER_PLAYER_CITIES_ADJUST_CITY_YIELD_PER_POPULATION" />
     <!-- Statically bound via TraitModifiers: +5% Production per citizen, resolved by the custom
-         EFFECT_YKKZ000_ADJUST_CITY_YIELD_PER_POPULATION_MODIFIER; the Loader keeps it in sync
-         with population changes. -->
+         EFFECT_YKKZ000_ADJUST_CITY_YIELD_PER_POPULATION_MODIFIER. Apply/Remove only aggregate the
+         per-citizen percent; the engine multiplies it by the current population when it reads city
+         yields (no population hook, no per-city applied total). -->
     <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_MODIFIER_PER_POPULATION" ModifierType="MODIFIER_YKKZ000_PLAYER_CITIES_ADJUST_CITY_YIELD_MODIFIER_PER_POPULATION"
       SubjectRequirementSetId="REQUIRESETS_YKKZ000_PLAYER_IS_SOVIET_UNION" />
   </Modifiers>
@@ -51,7 +53,8 @@
     <!-- Arguments of the statically bound +0.5 Production per citizen modifier -->
     <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_PER_POPULATION" Name="YieldType" Value="YIELD_PRODUCTION" />
     <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_PER_POPULATION" Name="Amount" Value="0.5" />
-    <!-- Arguments of the custom per-population modifier (Amount is a percent per citizen) -->
+    <!-- Arguments of the custom modifier: Amount is a percent per citizen (5 => +5% per citizen,
+         multiplied by the current population when the engine reads city yields). -->
     <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_MODIFIER_PER_POPULATION" Name="YieldType" Value="YIELD_PRODUCTION" />
     <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_MODIFIER_PER_POPULATION" Name="Amount" Value="5" />
   </ModifierArguments>

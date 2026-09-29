@@ -12,6 +12,11 @@
 // （offsetof / sizeof / 槽位常量），使引擎布局只存在一个事实来源。
 namespace ykkz000::civ6 {
 
+// 产出向量上限。DLC/模组会改变实际产出数，故运行期再与引擎真实长度取小校验，
+// 不把某个具体构建的产出数写死。用于 extra::CityExtra 等按 YieldTypes 索引的定长数组。
+// 目录语义：civ6/ 只镜像引擎布局；extra/ 存放本模组叠加数据与侧表。
+inline constexpr std::size_t kMaxYields = 64;
+
 // —— MSVC vtable 前置槽 ——
 // vtable[-1] 为 RTTI/COL 指针，克隆 vtable 时必须一并复制。否则新 vptr 前方是
 // HeapAlloc 块头，引擎的 dynamic_cast/typeid/异常展开会把堆头当指针用而写坏内存。

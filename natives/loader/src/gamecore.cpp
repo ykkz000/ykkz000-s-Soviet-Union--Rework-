@@ -35,6 +35,29 @@ constexpr char kTypesInsertAnchor[] =
 //
 //    已锁定的构建：GameCore_XP2_FinalRelease.dll（2024-06-27，SizeOfImage 0xC60000）。
 //
+//    RVA 语义核验记录（2026-09-29，在发布镜像上逐条反编译 0x180000000+rva 确认）：
+//      * 0x131B80 ChangePopulation：`0 < *(int*)(city+0x268)+delta` 才写；读
+//        +0xD8(owner)/+0xA8(city id) 组装 CityID（kind 标签 = 2）通知。
+//      * 0x131CF0 ChangeYieldModifier：`v = FUN_18072a920(city+0x4A0)`，反汇编确认该
+//        函数返回 param_1+0x10，故 v = city+0x4B0：v[0](+0x00) 为修正数组指针、v[2](+0x10)
+//        为计数、v+0x18 为越界回落标量，即数据 +0x4B0 / 计数 +0x4C0 / 回落 +0x4C8
+//        （此前"+0x4A0 数据 / +0x4B0 计数"系笔误）。
+//      * 0x12FF20 CalculateYield：基础累计 +0x10；修正子对象 +0x30（其累计 +0x40，初值
+//        0xFFFF9C00 = -100.0"无修正"）；修正来源含宗教追随者 +0x4E0、总督头衔 +0x510 ×
+//        GetNumTitles、game effects +0x4B0、项目 +0x6F0、+0x540 数组、地形/资源/电力等。
+//      * 0x83B220 AdjustCityYieldModifier::Apply：遍历 +0x18(条目数)/+0x30(数量)、
+//        +0x08 yields/+0x20 amounts，逐条调 0x131CF0，与 effect.h 布局一致。
+//      * 0x8D9110 AdjustPlayerStrengthModifier::Apply：+0x40 Amount；+0x44!=100 走 powf
+//        指数叠加；+0x48 上限；+0x4C 域(-1 关闭)；+0x50 ×0x6400 千分比；+0x54 回合/时代
+//        缩放；+0x58 按玩家数缩放；+0x5C 已应用总量；玩家身份取 ownerObj+0xD8。
+//      * 0x944040 ProposedCombat::AdjustPlayerStrengthModifier：单位(+0x128==playerId)
+//        或区域(GetOwner()==playerId) 写入 +0x2C，否则写入 +0x30。
+//      * 0x12FC10 TrackedValue::AddStep(this=修正子对象, step, u32, u32)：把一条修正明细
+//        并入 this+0x10（即 TrackedValue+0x40）；step 结构与 tooltip 键的约定待确认，
+//        当前仅暴露入口备查，不用于逻辑（读取路径仍直接累加 +0x40）。
+//      * 0x133780 GetYieldFromPopulation（CalculateYield 0x180130013 处调用）：每人口产出
+//        数组位于 city+0x690/+0x6A0/+0x6A8，单位 FixedPoint<8>。
+//
 //    锚点 RVA 自检：指纹（TimeDateStamp+SizeOfImage）只能证明“是同一版游戏”，
 //    无法发现 profile 取自另一份同名文件（曾整体错位 +0x12F0）。因此额外记录三个
 //    稳定字符串锚点在本构建中的 RVA，运行期实测比对；不一致即拒绝使用固定 RVA。
@@ -53,6 +76,12 @@ struct BuildProfile {
   std::ptrdiff_t rvaStrengthAccumulate;
   std::ptrdiff_t rvaChangeYieldModifier;
   std::ptrdiff_t rvaChangePopulation;
+  // City::Instance::CalculateYield(YieldTypes, TypeHash, bool) -> TrackedValue（sret）：
+  // 城市产出读取路径。发布构建（0x667C6F5B）入口 0x18012FF20 已核验，0xECB 字节。
+  std::ptrdiff_t rvaCityCalculateYield;
+  // TrackedValue::AddStep(this, step, u32, u32)：修正明细追加入口。RVA 已核验；step 结构
+  // 与 tooltip 键的参数约定待确认，仅暴露备查（见上方核验记录）。
+  std::ptrdiff_t rvaTrackedValueAddStep;
   // 处理器注册（handler registry）：前三项为代码；后两项为数据（handler 对象/描述表，
   // 未经运行期校验，仅作诊断）。
   std::ptrdiff_t rvaHandlerRegistryInit;
@@ -86,6 +115,8 @@ constexpr BuildProfile kKnownXp2Build{
     0x944040,     // FUN_180944040(target, playerId, amount)：战斗力修正的写入点
     0x131CF0,     // City::Instance::ChangeYieldModifier(YieldTypes, int)
     0x131B80,     // City::Instance::ChangePopulation(int delta)
+    0x12FF20,     // City::Instance::CalculateYield(YieldTypes, TypeHash, bool) -> TrackedValue
+    0x12FC10,     // TrackedValue::AddStep(this, step, u32, u32)：修正明细追加（参数待确认）
     0x4891B0,     // FUN_1804891b0(void* root)：建立内建 handler 注册表
     0x6083F0,     // FUN_1806083f0(root, kind, hash, handlerObj)：设置/替换/移除 handler
     0x489040,     // FUN_180489040(container, outNode, hashPtr)：handler 表插入/查找
@@ -275,6 +306,8 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   resolved.strengthAccumulate = computeRva(kKnownXp2Build.rvaStrengthAccumulate);
   resolved.changeYieldModifier = computeRva(kKnownXp2Build.rvaChangeYieldModifier);
   resolved.changePopulation = computeRva(kKnownXp2Build.rvaChangePopulation);
+  resolved.cityCalculateYield = computeRva(kKnownXp2Build.rvaCityCalculateYield);
+  resolved.trackedValueAddStep = computeRva(kKnownXp2Build.rvaTrackedValueAddStep);
   resolved.handlerRegistryInit = computeRva(kKnownXp2Build.rvaHandlerRegistryInit);
   resolved.setEffectHandler = computeRva(kKnownXp2Build.rvaSetEffectHandler);
   resolved.handlerNodeInsert = computeRva(kKnownXp2Build.rvaHandlerNodeInsert);
@@ -283,10 +316,6 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   resolved.templateAnalyze = computeRva(kKnownXp2Build.rvaTemplateAnalyze);
   resolved.templateApply = computeRva(kKnownXp2Build.rvaTemplateApply);
   resolved.effectHandlerDispatch = computeRva(kKnownXp2Build.rvaEffectHandlerDispatch);
-#if defined(YKKZ000_DISABLE_POPULATION_HOOK)
-  // 诊断开关：置空入口；插件据此跳过人口 hook，效果退化为“建立时快照”。
-  resolved.changePopulation = nullptr;
-#endif
   resolved.module = module;
   // 记录各入口实际 RVA（纯算术校验；身份校验已在上面的锚点比对中完成）。
   logRva("getEffectRegistry", resolved.getEffectRegistry, module,
@@ -310,6 +339,10 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
          kKnownXp2Build.rvaChangeYieldModifier);
   logRva("changePopulation", resolved.changePopulation, module,
          kKnownXp2Build.rvaChangePopulation);
+  logRva("cityCalculateYield", resolved.cityCalculateYield, module,
+         kKnownXp2Build.rvaCityCalculateYield);
+  logRva("trackedValueAddStep", resolved.trackedValueAddStep, module,
+         kKnownXp2Build.rvaTrackedValueAddStep);
   logRva("handlerRegistryInit", resolved.handlerRegistryInit, module,
          kKnownXp2Build.rvaHandlerRegistryInit);
   logRva("setEffectHandler", resolved.setEffectHandler, module,
@@ -323,8 +356,8 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   logRva("templateApply", resolved.templateApply, module, kKnownXp2Build.rvaTemplateApply);
   logRva("effectHandlerDispatch", resolved.effectHandlerDispatch, module,
          kKnownXp2Build.rvaEffectHandlerDispatch);
-  // changePopulation 不列入致命检查：缺失时插件跳过人口 hook，退化为建立时人口快照，
-  // 而不是让整个 Loader 无法初始化。
+  // changePopulation / cityCalculateYield / trackedValueAddStep 不列入致命检查：缺失时插件
+  // 跳过对应 hook/注入，效果优雅降级，而不是让整个 Loader 无法初始化。
   if (resolved.getEffectRegistry == nullptr || resolved.mallocTemp == nullptr ||
       resolved.reserveVector == nullptr || resolved.effectApply == nullptr ||
       resolved.effectRemove == nullptr || resolved.changeYieldModifier == nullptr) {
@@ -394,6 +427,8 @@ void publishEngineApi(const GameCoreApi& api) {
   engine.proposedCombatAdjust = api.strengthAccumulate;
   engine.changeYieldModifier = api.changeYieldModifier;
   engine.changePopulation = api.changePopulation;
+  engine.cityCalculateYield = api.cityCalculateYield; // v7 追加
+  engine.trackedValueAddStep = api.trackedValueAddStep; // v8 追加
   engine.getPlayer = api.getPlayerByIndex;
   engine.getGameManager = api.getGameManager;
   g_engineApi = engine;

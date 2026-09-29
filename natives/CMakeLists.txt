@@ -3,11 +3,8 @@ project(YKKZ000Dlls LANGUAGES CXX)
 
 # 诊断用二分开关（默认关闭，仅用于定位崩溃归属）：
 # - 关闭自定义行为路径（注册时不再提供实现，退化为模板行为）
-# - 禁用 ChangePopulation hook
 option(YKKZ000_DISABLE_CUSTOM_BEHAVIOR
   "注册效果时不再提供实现（禁用自定义效果路径）" OFF)
-option(YKKZ000_DISABLE_POPULATION_HOOK
-  "禁用 ChangePopulation hook" OFF)
 option(YKKZ000_DISABLE_EFFECT_HANDLER
   "禁用效果 handler 注册（内建 handler 表 hook）" OFF)
 option(YKKZ000_DISABLE_HANDLER_GUARD

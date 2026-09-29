@@ -53,6 +53,11 @@ struct GameCoreApi {
                                           // 自己解析出的权威玩家标识
   void*   changeYieldModifier = nullptr; // City::Instance::ChangeYieldModifier(YieldTypes, int)
   void*   changePopulation = nullptr;  // City::Instance::ChangePopulation(int delta)
+  // 城市产出读取路径（可选：缺失时“每市民百分比”效果退化为不缩放）。
+  // City::Instance::CalculateYield(YieldTypes, TypeHash, bool) -> TrackedValue（sret）。
+  void*   cityCalculateYield = nullptr;
+  // TrackedValue::AddStep(this, step, u32, u32)：修正明细追加入口（可选，参数约定待确认）。
+  void*   trackedValueAddStep = nullptr;
   // 处理器注册：handlerRegistryInit/setEffectHandler/handlerNodeInsert 为代码；后两者指向引擎数据。
   void*   handlerRegistryInit = nullptr;   // FUN_1804891b0(root)：建立内建 handler 表
   void*   setEffectHandler = nullptr;      // FUN_1806083f0(root, kind, hash, handlerObj)
