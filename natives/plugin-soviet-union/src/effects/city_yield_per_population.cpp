@@ -11,14 +11,15 @@
 #include <ykkz000/civ6/city.h>
 #include <ykkz000/civ6/effect.h>
 #include <ykkz000/civ6/tracked_value.h>
-#include <ykkz000/extra/city_extra.h>
+#include <ykkz000/extra/player_extra.h>
 
 #include "engine_access.h"
 
 // 每市民 × Amount% 的城市产出修正（读取时乘）。
 //
-// 思路：Apply/Remove 只把“每市民百分比”聚合进 CityExtra 侧表（键 = city_id + owner），
-// 真正的“乘人口”发生在引擎的产出读取路径 City::Instance::CalculateYield 上——
+// 思路：Apply/Remove 只把“每市民百分比”聚合进 PlayerExtras 的 city_extras 侧表
+// （顶层键 = 玩家 id，子键 = city_id），真正的“乘人口”发生在引擎的产出读取路径
+// City::Instance::CalculateYield 上——
 // 返回前按引擎自己的方式追加一条修正步：TrackedValue::AddStep(out+0x30, step, 0, 0,
 // tooltipKey)，step.value = (percent[yield] * population) >> 8。
 // 因此人口变化、产出重算天然使用最新人口，无需 ChangePopulation hook，也无
@@ -81,10 +82,12 @@ bool kCalculateYieldInstalled = false;
 std::atomic<std::uint64_t> kTableGeneration{0};
 
 // 读路径 TLS 缓存：同键的连续查询直接命中，避免每次加共享锁查表。
-// 以侧表键（而非城市指针）为缓存标识：城市指针被回收复用时键不同，天然失效。
+// 以侧表键（玩家 id + 城市 id，而非城市指针）为缓存标识：城市指针被回收复用时键
+// 不同，天然失效。
 struct TlsCache {
   std::uint64_t generation = 0;
-  extra::CityKey key{};
+  std::int32_t player_id = -1;
+  std::int32_t city_id = -1;
   extra::CityExtra extra{};
   bool valid = false;
 };
@@ -129,16 +132,22 @@ bool ReadEffectEntries(void* self, std::vector<EffectEntry>& out) {
   return !out.empty();
 }
 
-// 由城市实例取侧表键（读 +0xA8 / +0xD8，做合理性校验）。
-bool KeyOf(const void* city, extra::CityKey& key) {
+// 由城市实例取侧表键（读 +0xD8 玩家 / +0xA8 城市 id，做合理性校验）。
+// 顶层键即该城市所属玩家（PlayerExtras 以玩家为单位隔离重复文明/领袖）。
+struct CityRef {
+  std::int32_t player_id = -1;
+  std::int32_t city_id = -1;
+};
+
+bool KeyOf(const void* city, CityRef& ref) {
   const std::int32_t city_id =
       TryReadOr(city, &civ6::City::Instance::city_id, std::int32_t{-1});
   const std::int32_t owner = TryReadOr(city, &civ6::City::Instance::owner, std::int32_t{-1});
   if (city_id < 0 || owner < 0 || owner > kMaxPlausiblePlayerIndex) {
     return false;
   }
-  key.city_id = city_id;
-  key.owner_id = owner;
+  ref.player_id = owner;
+  ref.city_id = city_id;
   return true;
 }
 
@@ -151,44 +160,45 @@ void ApplyEntries(void* self, void* city, int sign) {
   if (!ReadEffectEntries(self, entries)) {
     return;
   }
-  extra::CityKey key;
-  if (!KeyOf(city, key)) {
+  CityRef ref;
+  if (!KeyOf(city, ref)) {
     return;
   }
   static std::atomic<bool> kLoggedFirstApply{false};
   if (!kLoggedFirstApply.exchange(true)) {
     LogF(1, "city-yield: first apply self=%p city=%p owner=%d entries=%zu", self, city,
-         key.owner_id, entries.size());
+         ref.player_id, entries.size());
     for (const EffectEntry& entry : entries) {
       LogF(2, "city-yield: entry yield=%d amount=%d", entry.yield_type, entry.amount);
     }
   }
   constexpr std::int64_t kPercentMin = std::numeric_limits<std::int32_t>::min();
   constexpr std::int64_t kPercentMax = std::numeric_limits<std::int32_t>::max();
-  extra::CityExtras().Edit(key, [&](extra::CityExtra& extra) {
-    for (const EffectEntry& entry : entries) {
-      if (entry.yield_type < 0 ||
-          entry.yield_type >= static_cast<int>(civ6::kMaxYields)) {
-        continue;
-      }
-      if (entry.amount < -kMaxPlausibleAmount || entry.amount > kMaxPlausibleAmount) {
-        continue;
-      }
-      const std::int64_t delta =
-          static_cast<std::int64_t>(entry.amount) * kPercentUnit * sign;
-      std::int64_t updated =
-          static_cast<std::int64_t>(extra.percent[entry.yield_type]) + delta;
-      if (updated > kPercentMax) {
-        updated = kPercentMax;
-      } else if (updated < kPercentMin) {
-        updated = kPercentMin;
-      }
-      extra.percent[entry.yield_type] = static_cast<std::int32_t>(updated);
-      if (entry.yield_type + 1 > extra.yield_count) {
-        extra.yield_count = entry.yield_type + 1;
-      }
-    }
-  });
+  extra::PlayerExtras().EditCity(
+      ref.player_id, ref.city_id, ref.player_id, [&](extra::CityExtra& extra) {
+        for (const EffectEntry& entry : entries) {
+          if (entry.yield_type < 0 ||
+              entry.yield_type >= static_cast<int>(civ6::kMaxYields)) {
+            continue;
+          }
+          if (entry.amount < -kMaxPlausibleAmount || entry.amount > kMaxPlausibleAmount) {
+            continue;
+          }
+          const std::int64_t delta =
+              static_cast<std::int64_t>(entry.amount) * kPercentUnit * sign;
+          std::int64_t updated =
+              static_cast<std::int64_t>(extra.percent[entry.yield_type]) + delta;
+          if (updated > kPercentMax) {
+            updated = kPercentMax;
+          } else if (updated < kPercentMin) {
+            updated = kPercentMin;
+          }
+          extra.percent[entry.yield_type] = static_cast<std::int32_t>(updated);
+          if (entry.yield_type + 1 > extra.yield_count) {
+            extra.yield_count = entry.yield_type + 1;
+          }
+        }
+      });
   // 侧表变化后失效引擎的城市产出缓存，并发送一条 0 增量的“产出已变化”通知。
   //
   // 引擎的产出读取路径（发布 FUN_1801332F0）缓存 (city, yield) 的计算结果
@@ -222,25 +232,26 @@ void ApplyEntries(void* self, void* city, int sign) {
     }
   }
   if (sign < 0) {
-    extra::CityExtras().EraseIfEmpty(key);
+    extra::PlayerExtras().EraseIfEmptyCity(ref.player_id, ref.city_id);
   }
   kTableGeneration.fetch_add(1, std::memory_order_release);
 }
 
 // 读路径命中查询：优先 TLS 缓存，未命中再查表并按需回填。
-const extra::CityExtra* LookupExtra(const extra::CityKey& key) {
+const extra::CityExtra* LookupExtra(std::int32_t player_id, std::int32_t city_id) {
   const std::uint64_t generation = kTableGeneration.load(std::memory_order_acquire);
   if (kCache.valid && kCache.generation == generation &&
-      extra::CityKeyEqual{}(kCache.key, key)) {
+      kCache.player_id == player_id && kCache.city_id == city_id) {
     return &kCache.extra;
   }
   extra::CityExtra found;
-  if (!extra::CityExtras().Find(key, found)) {
+  if (!extra::PlayerExtras().FindCity(player_id, city_id, found)) {
     kCache.valid = false;
     return nullptr;
   }
   kCache.generation = generation;
-  kCache.key = key;
+  kCache.player_id = player_id;
+  kCache.city_id = city_id;
   kCache.extra = found;
   kCache.valid = true;
   return &kCache.extra;
@@ -251,10 +262,9 @@ std::atomic<long> kCallCount{0};
 std::atomic<long> kHitCount{0};
 
 // 命中探针：限流打印关键量，便于判定“数值是否进入引擎”。
-void LogHit(const extra::CityKey& key, int yield, int population, std::int64_t delta,
-            long hit) {
-  LogF(2, "city-yield: hit#%ld yield=%d pop=%d owner=%d delta=%lld", hit, yield, population,
-       key.owner_id, static_cast<long long>(delta));
+void LogHit(const CityRef& ref, int yield, int population, std::int64_t delta, long hit) {
+  LogF(2, "city-yield: hit#%ld yield=%d pop=%d player=%d city=%d delta=%lld", hit, yield,
+       population, ref.player_id, ref.city_id, static_cast<long long>(delta));
 }
 
 void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
@@ -283,11 +293,11 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
              "side table or key may be wrong");
     }
   }
-  extra::CityKey key;
-  if (!KeyOf(city, key)) {
+  CityRef ref;
+  if (!KeyOf(city, ref)) {
     return returned;
   }
-  const extra::CityExtra* extra = LookupExtra(key);
+  const extra::CityExtra* extra = LookupExtra(ref.player_id, ref.city_id);
   if (extra == nullptr || yield >= extra->yield_count) {
     return returned;
   }
@@ -330,7 +340,7 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
            static_cast<std::size_t>(kModifierAccumulatedOffset), modifier);
     }
     if (log_this) {
-      LogHit(key, yield, population, delta, hit);
+      LogHit(ref, yield, population, delta, hit);
     }
     return returned;
   }
@@ -358,7 +368,7 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
                      static_cast<std::int32_t>(updated));
   }
   if (log_this) {
-    LogHit(key, yield, population, delta, hit);
+    LogHit(ref, yield, population, delta, hit);
   }
   return returned;
 }
@@ -406,8 +416,10 @@ void ResetCaches() {
 }
 
 // 清空侧表并令所有线程的 TLS 缓存失效（代际自增对所有线程可见）。
+// 注意：PlayerExtras() 与 strength 模块共用同一张表；重复 Clear 幂等（清空即空表），
+// 但只应在上下文创建/销毁或插件卸载这些“全局失效”时机调用。
 void ClearExtras() {
-  extra::CityExtras().Clear();
+  extra::PlayerExtras().Clear();
   kTableGeneration.fetch_add(1, std::memory_order_release);
   ResetCaches();
 }
