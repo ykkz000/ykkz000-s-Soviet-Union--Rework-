@@ -43,12 +43,18 @@ namespace ykkz000::extra {
 // 聚合语义：Apply 时 +=，Remove 时 -=，与调用顺序/实例个数无关（同参数重复实例
 // 不再有歧义）；向量全零即擦除，避免残留。
 //
+// per_suzerain_percent[y]：该城市在该产出上的“每宗主城邦百分比”，与 percent[y] 同
+//   单位（FixedPoint<16>，0x10000 == +1.0%/宗主）。宗主数属运行期变量，故不在写入时
+//   乘算，而是在读取路径按 (per_suzerain_percent[y] × 当前宗主数) >> 8 折算进引擎修正
+//   单位，使宗主数变化被下一次读取自然跟随。
+//
 // owner_id 仅作冗余校验：读取时回读 City+0xD8 比对，防指针回收/易主错配。
 struct CityExtra {
   std::int32_t city_id = -1;    // City::Instance +0xA8
   std::int32_t owner_id = -1;   // City::Instance +0xD8（PlayerTypes）
-  std::int32_t yield_count = 0; // 有效长度（≤ civ6::kMaxYields）
+  std::int32_t yield_count = 0; // 有效长度（≤ civ6::kMaxYields），两张数组共用
   std::array<std::int32_t, civ6::kMaxYields> percent{};
+  std::array<std::int32_t, civ6::kMaxYields> per_suzerain_percent{};
 };
 
 static_assert(std::is_standard_layout_v<CityExtra>);
@@ -170,7 +176,7 @@ class PlayerExtraTable {
     return unit_it->second.strength_per_suzerain;
   }
 
-  // 向量全零后擦除该城市条目；子表全空时连玩家条目一并擦除，避免残留空壳。
+  // 两张数组全零后擦除该城市条目；子表全空时连玩家条目一并擦除，避免残留空壳。
   void EraseIfEmptyCity(std::int32_t player_id, std::int32_t city_id) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     const auto player_it = table_.find(PlayerKey{player_id});
@@ -183,6 +189,11 @@ class PlayerExtraTable {
       return;
     }
     for (const std::int32_t value : city_it->second.percent) {
+      if (value != 0) {
+        return;
+      }
+    }
+    for (const std::int32_t value : city_it->second.per_suzerain_percent) {
       if (value != 0) {
         return;
       }

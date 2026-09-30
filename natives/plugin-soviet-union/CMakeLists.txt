@@ -4,7 +4,9 @@ add_library(YKKZ000SovietUnionPlugin SHARED
   src/plugin.cpp
   src/effects/effect_modules.cpp
   src/effects/engine_access.cpp
+  src/effects/city_yield_common.cpp
   src/effects/city_yield_per_population.cpp
+  src/effects/city_yield_per_suzerain.cpp
   src/effects/strength_per_suzerain.cpp
   resource.rc
   plugin.def)
