@@ -10,23 +10,26 @@
 
 #include "loader_internal.h"
 
-// 进程内唯一的 MinHook 门面（hook service）。
+// The process-wide single MinHook facade (hook service).
 //
-// 背景：MinHook 是全局单例；若插件自行链接一份 MinHook，两份状态会互相破坏
-// trampoline。因此插件的所有 hook 一律经本服务安装，并按 pluginHandle 登记归属，
-// 卸载时由 Loader 兜底撤销。
+// Background: MinHook is a global singleton; if a plugin links its own copy of MinHook, the two
+// sets of state corrupt each other's trampolines. Therefore all plugin hooks are installed through
+// this service, registered for ownership by pluginHandle, and revoked by the Loader as a fallback
+// on unload.
 //
-// 归属策略：
-//   - Loader 自身的机制 hook（pluginHandle == nullptr）：只停用不移除，跳板保留在
-//     Loader（常驻）内，便于下一个游戏上下文重新启用。
-//   - 插件 hook：登记 pluginHandle；removeHooksForPlugin 在插件卸载时停用并移除，
-//     避免 detour 指向已卸载代码。
+// Ownership policy:
+//   - The Loader's own mechanism hooks (pluginHandle == nullptr): disabled but not removed; the
+//     trampoline stays inside the (resident) Loader so the next game context can re-enable it.
+//   - Plugin hooks: registered with pluginHandle; removeHooksForPlugin disables and removes them
+//     when the plugin unloads, so the detour does not point at unloaded code.
 //
-// 幂等契约（重要）：installHook / removeHook 可在“注册期 + 每次游戏上下文创建”重复
-// 调用。MinHook 的 MH_ERROR_ENABLED / MH_ERROR_DISABLED 表示“目标已处于期望状态”，
-// 属成功语义，绝不可作为失败上报——否则插件会把已启用的 hook 视作安装失败并清空跳板，
-// 留下“仍在拦截但不再转发”的静默丢弃状态。同一目标重复安装须复用既有跳板并写回
-// 调用方的 original。
+// Idempotence contract (important): installHook / removeHook may be called repeatedly during
+// "registration + every game-context creation". MinHook's MH_ERROR_ENABLED / MH_ERROR_DISABLED
+// mean "the target is already in the desired state", which is success semantics and must never be
+// reported as failure -- otherwise a plugin would treat an already-enabled hook as an install
+// failure and clear the trampoline, leaving a silent-drop state that "still intercepts but no
+// longer forwards". Reinstalling the same target must reuse the existing trampoline and write it
+// back to the caller's original.
 namespace ykkz000::loader {
 namespace {
 
@@ -39,11 +42,13 @@ struct HookRecord {
 std::mutex g_hookMutex;
 std::unordered_map<void*, HookRecord> g_hooks;
 
-// —— 调用期批次（prepare 失败时的兜底回滚）——
-// registerEffectType 在调用插件 prepare 前开启一个批次，批次内“新创建”的 hook 会被
-// 登记；prepare 返回非 0 时 endHookScope(true) 一键移除本批次新建的全部 hook。
-// 主责仍是插件在 prepare 失败时自行撤销；本批次只按“本次调用期间新建”兜底，不触碰
-// 批次开启前已存在的 hook（重新启用场景不在此列）。
+// -- Call-time batch (fallback rollback on prepare failure) --
+// registerEffectType opens a batch before calling the plugin prepare; hooks "newly created" within
+// the batch are recorded; when prepare returns non-zero, endHookScope(true) removes every hook newly
+// created in this batch in one shot. The primary responsibility remains the plugin revoking its own
+// hooks when prepare fails; this batch is only a fallback keyed on "newly created during this call",
+// and does not touch hooks that already existed before the batch was opened (the re-enable case is
+// not covered here).
 std::vector<std::vector<void*>> g_hookScopes;
 
 std::once_flag g_initOnce;
@@ -86,8 +91,10 @@ int serviceInstallHook(void* pluginHandle, void* target, void* detour, void** or
     logMessageF(1, "hook: create target=%p detour=%p -> %d trampoline=%p", target, detour,
                 static_cast<int>(created), trampoline);
     if (created == MH_ERROR_ALREADY_CREATED) {
-      // MinHook 已存在该目标的 hook，但本服务无登记：无法取回既有跳板、也无法比对
-      // detour，故按“不同 detour”拒装。若强行登记将得到“已启用但跳板缺失”的危险状态。
+      // MinHook already has a hook for this target, but this service has no record: the existing
+      // trampoline cannot be retrieved and the detour cannot be compared, so refuse to install as
+      // a "different detour". Force-registering would yield the dangerous "enabled but trampoline
+      // missing" state.
       logMessageF(0, "hook: target=%p already created outside the hook service; refusing", target);
       return -3;
     }
@@ -103,21 +110,22 @@ int serviceInstallHook(void* pluginHandle, void* target, void* detour, void** or
     }
     g_hooks.emplace(target, record);
     if (!g_hookScopes.empty()) {
-      g_hookScopes.back().push_back(target); // 供 prepare 失败时回滚
+      g_hookScopes.back().push_back(target); // for rollback when prepare fails
     }
   } else {
-    // 已登记：同一 detour 视为幂等复用，不同 detour 拒装（保持“一个目标一个 detour”）。
+    // Already recorded: the same detour is treated as idempotent reuse; a different detour is
+    // refused (keeping "one target, one detour").
     HookRecord& record = it->second;
     if (record.detour != detour) {
       logMessageF(0, "hook: target=%p already hooked with a different detour; refusing", target);
       return -3;
     }
     if (record.original != nullptr && *record.original != nullptr) {
-      *original = *record.original; // 复用既有跳板（重新启用场景）
+      *original = *record.original; // reuse the existing trampoline (re-enable case)
       logMessageF(1, "hook: reuse target=%p trampoline=%p", target, *record.original);
     }
     if (pluginHandle != nullptr && record.pluginHandle == nullptr) {
-      record.pluginHandle = pluginHandle; // 归属升级为插件
+      record.pluginHandle = pluginHandle; // upgrade ownership to the plugin
     }
   }
   const MH_STATUS enabled = MH_EnableHook(target);

@@ -15,16 +15,19 @@
 namespace ykkz000::plugin {
 namespace {
 
-// 引擎自身入口 City::Instance::ChangeYieldModifier(YieldTypes, int)（发布 RVA 0x131CF0）。
-// 以 0 增量调用不改数值数组，但会走引擎的“产出已变化”通知/失效分发（0x5FB890）。
+// The engine's own entry City::Instance::ChangeYieldModifier(YieldTypes, int) (published RVA
+// 0x131CF0). Calling it with a zero delta leaves the value array unchanged but goes through the
+// engine's "yield changed" notification/invalidation dispatch (0x5FB890).
 using ChangeYieldModifierFn = void (*)(void* city, int yield, int delta);
 
-// 侧表写代际：Apply/Remove 后自增，令 TLS 缓存失效（写路径在各自锁内完成）。
+// Side-table write generation: incremented after Apply/Remove to invalidate TLS caches (write
+// paths complete inside their own locks).
 std::atomic<std::uint64_t> kTableGeneration{0};
 
-// 读路径 TLS 缓存：同键的连续查询直接命中，避免每次加共享锁查表。
-// 以侧表键（玩家 id + 城市 id，而非城市指针）为缓存标识：城市指针被回收复用时键
-// 不同，天然失效。
+// Read-path TLS cache: consecutive lookups of the same key hit directly, avoiding a shared-lock
+// table lookup on every call.
+// The cache identity is the side-table key (player id + city id, not the city pointer): when a
+// city pointer is recycled and reused, the key differs and the cache is invalidated naturally.
 struct TlsCache {
   std::uint64_t generation = 0;
   std::int32_t player_id = -1;
@@ -34,9 +37,11 @@ struct TlsCache {
 };
 thread_local TlsCache kCache;
 
-// 宗主数缓存：CountSuzerainsOfPlayer 会遍历玩家向量，而读取发生在城市产出热路径。
-// TTL 方案在“刚变更宗主”的短时间内最多滞后一个 TTL；写入点（Apply/Remove）与上下文
-// 切换均不经过此处，改由 TTL 兜底。
+// Suzerain-count cache: CountSuzerainsOfPlayer walks the player vector, whereas the read happens
+// on the city-yield hot path.
+// The TTL approach is stale by at most one TTL for a short time right after a suzerain change;
+// the write points (Apply/Remove) and context switches do not pass through here, so the TTL is
+// the fallback.
 struct SuzerainCountEntry {
   int count = -1;
   std::chrono::steady_clock::time_point expiry{};
@@ -150,7 +155,8 @@ void ResetCityYieldCommonCaches() {
     std::unique_lock<std::shared_mutex> lock(kSuzerainMutex);
     kSuzerainCache.clear();
   }
-  // 代际自增使其它线程的 TLS 快照一并失效（仅清本线程 TLS 不足以覆盖其它线程）。
+  // Bumping the generation invalidates other threads' TLS snapshots too (clearing only this
+  // thread's TLS would not cover them).
   InvalidateCityExtraSnapshotCache();
 }
 
@@ -166,7 +172,8 @@ int SuzerainCountForPlayer(std::int32_t player_id) {
       return it->second.count;
     }
   }
-  // 优先按 +0xD8 匹配（下标≠玩家类型），失败再退回按下标取真玩家。
+  // Prefer matching by +0xD8 (index != player type); on failure fall back to taking the real
+  // player at that index.
   void* player = PlayerById(player_id);
   if (player == nullptr || !IsRealPlayer(player)) {
     player = PlayerAtIndex(player_id);

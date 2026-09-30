@@ -27,8 +27,9 @@ void writePointer(void* base, std::size_t offset, void* value) {
   *reinterpret_cast<void**>(static_cast<std::uint8_t*>(base) + offset) = value;
 }
 
-// 直接读取工厂对象 +0x08 的类型哈希，绝不调用引擎虚函数：`GetTypeId()` 等价于
-// 返回该字段，而按猜测签名调用 vtable 触发过 /GS 栈 cookie 快速失败。
+// Read the factory object's type hash directly at +0x08; never call an engine virtual function:
+// `GetTypeId()` is equivalent to returning that field, and calling a vtable with a guessed
+// signature once triggered a /GS stack-cookie fast fail.
 std::uint32_t typeIdOf(void* factory) {
   if (factory == nullptr) {
     return 0;
@@ -58,8 +59,9 @@ void* findTemplateFactory(void* vector, std::uint32_t templateHash) {
   return nullptr;
 }
 
-// 校验插件提供的实现自洽：声明替换 Apply/Remove 槽时必须给出对应的模板函数指针，
-// 否则 Loader 无法在克隆 vtable 中定位槽。
+// Validate that the plugin-provided implementation is self-consistent: declaring a replacement for
+// the Apply/Remove slot requires the corresponding template function pointer, otherwise the Loader
+// cannot locate the slot in the cloned vtable.
 bool isImplConsistent(const bridge::EffectImpl* impl) {
   if (impl == nullptr) {
     return true;
@@ -73,8 +75,9 @@ bool isImplConsistent(const bridge::EffectImpl* impl) {
   return true;
 }
 
-// 从引擎注册表向量移除“刚追加”的工厂对象：把 end 指针回退一格并清空该槽。仅在末项
-// 确实指向本次追加的 factory 时才动，避免异常状态下误删他人条目。
+// Remove the "just appended" factory object from the engine registry vector: step the end pointer
+// back one and clear that slot. It only acts when the last entry really points at this factory,
+// avoiding deleting someone else's entry in an abnormal state.
 void removeLastFactory(void* vector, void* factory) {
   if (vector == nullptr || factory == nullptr) {
     return;
@@ -94,8 +97,9 @@ void removeLastFactory(void* vector, void* factory) {
   writePointer(vector, offsetof(civ6::VectorView<void*>, end), last);
 }
 
-// registerEffectType 的失败回滚，调用方须持有 g_registryMutex：撤销本次登记的全部痕迹
-// （工厂向量项、typeHash、已注册效果记录、impl 记录与类型名）。未登记成功的部分为 no-op。
+// Failure rollback for registerEffectType; the caller must hold g_registryMutex: undo every trace
+// of this registration (factory vector entry, typeHash, registered-effect record, impl record, and
+// type name). Parts that were not successfully registered are no-ops.
 void rollbackRegistrationLocked(std::uint32_t typeHash, void* vector, void* factory) {
   logMessageF(0, "registerEffectType: rolling back hash=0x%08X", typeHash);
   removeLastFactory(vector, factory);
@@ -130,8 +134,9 @@ bool isRegisteredTemplateHash(std::uint32_t hash) {
   return false;
 }
 
-// 自定义效果自身的类型哈希（工厂对象 +0x08），区别于 isRegisteredTemplateHash 的
-// 模板哈希。模板 Create 旁路诊断据此把对象标注为 custom / built-in。
+// The custom effect's own type hash (factory object +0x08), distinct from the template hash of
+// isRegisteredTemplateHash. Template-Create bypass diagnostics use this to label objects as
+// custom / built-in.
 bool isRegisteredHash(std::uint32_t typeHash) {
   if (typeHash == 0) {
     return false;
@@ -173,13 +178,13 @@ int registerEffectType(const bridge::EffectDesc* desc) {
   std::lock_guard<std::mutex> guard(g_registryMutex);
   logMessageF(1, "reg: registry lock acquired");
   if (g_registeredHashes.find(typeHash) != g_registeredHashes.end()) {
-    return 0; // 已注册，幂等
+    return 0; // already registered; idempotent
   }
 
   const auto getRegistry = reinterpret_cast<bridge::GetEffectRegistryFn>(api.getEffectRegistry);
-  logMessageF(1, "reg: calling GetTypes @%p", api.getEffectRegistry); // 崩溃前最后一条
+  logMessageF(1, "reg: calling GetTypes @%p", api.getEffectRegistry); // last line before a crash
   void* vector = getRegistry();
-  logMessageF(1, "reg: GetTypes returned vector=%p", vector);         // 崩溃后下一条
+  logMessageF(1, "reg: GetTypes returned vector=%p", vector);         // next line after the crash
   void* templateFactory = findTemplateFactory(vector, templateHash);
   logMessageF(1, "reg: templateFactory=%p", templateFactory);
   if (templateFactory == nullptr) {
@@ -194,8 +199,9 @@ int registerEffectType(const bridge::EffectDesc* desc) {
     return -4;
   }
 
-  // 自定义行为：把克隆工厂的 Create 槽指向 Loader 的泛化入口，并登记插件实现
-  // （实现细节由插件提供，Loader 不再有任何行为分支）。
+  // Custom behavior: point the cloned factory's Create slot at the Loader's generalized entry and
+  // register the plugin implementation (the implementation details come from the plugin; the Loader
+  // has no behavior branches anymore).
   if (custom) {
     auto* templateVtable = *reinterpret_cast<void***>(templateFactory);
     void* templateCreate =
@@ -255,9 +261,11 @@ int registerEffectType(const bridge::EffectDesc* desc) {
       RegisteredEffect{typeHash, templateHash, std::string(desc->typeName)});
   logMessageF(1, "reg: done hash=0x%08X", typeHash);
 
-  // 唯一的 hook 安装入口：注册期在工厂/实现已登记后调用插件提供的 prepare。返回非 0
-  // 即视为注册失败：先移除本批次新建的 hook（兜底；主责是 prepare 自行撤销半程安装），
-  // 再回滚本次登记并返回错误码。
+  // The single hook-install entry: at registration time, call the plugin-provided prepare after the
+  // factory/implementation have been registered. A non-zero return is treated as a registration
+  // failure: first remove the hooks newly created in this batch (fallback; the primary
+  // responsibility is prepare revoking its own half-completed installs), then roll back this
+  // registration and return the error code.
   if (desc->prepare != nullptr) {
     logMessageF(1, "reg: invoking prepare hash=0x%08X", typeHash);
     beginHookScope();

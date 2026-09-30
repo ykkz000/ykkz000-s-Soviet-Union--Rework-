@@ -157,7 +157,7 @@ void* ResolvePlayerFromObject(const void* object, const char*& via) {
 
 int CountSuzerainsOfPlayer(void* player) {
   if (!IsRealPlayer(player)) {
-    return -1; // 必须是玩家向量中的真玩家，而非“恰好可读”的伪指针
+    return -1; // Must be a real player from the player vector, not a merely "readable" fake pointer
   }
   const civ6::PlayerTypes target =
       TryReadOr(player, &civ6::Player::Instance::player_type, civ6::kInvalidPlayerType);
@@ -182,7 +182,7 @@ int CountSuzerainsOfPlayer(void* player) {
     civ6::Player::Influence* influence = nullptr;
     if (!TryRead(candidate, &civ6::Player::Instance::influence, influence) ||
         !IsCandidateObject(influence)) {
-      continue; // 无 Influence 或指针不可信：该玩家不贡献宗主数
+      continue; // No Influence or untrusted pointer: this player contributes no suzerain count
     }
     const civ6::PlayerTypes suzerain =
         TryReadOr(influence, &civ6::Player::Influence::suzerain, civ6::kInvalidPlayerType);

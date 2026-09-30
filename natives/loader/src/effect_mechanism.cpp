@@ -10,28 +10,31 @@
 
 #include "loader_internal.h"
 
-// 效果“机制”层：泛化的自定义 EffectType 实现登记 + 工厂 Create 包装 + 效果对象
-// vtable 槽替换与归属登记。
+// Effect "mechanism" layer: generalized custom EffectType implementation registration + factory
+// Create wrapping + effect-object vtable slot replacement and ownership registration.
 //
-// 本文件不认识任何具体行为：行为由插件通过 bridge::EffectImpl 提供（Apply/Remove/
-// analyze/handlerApply 函数指针），Loader 只按函数指针值在克隆 vtable 中定位并替换
-// 对应槽。绝不修改引擎共享的静态 vtable。
+// This file knows no concrete behavior: behavior is supplied by plugins via bridge::EffectImpl
+// (Apply/Remove/analyze/handlerApply function pointers); the Loader only locates and replaces the
+// corresponding slots in the cloned vtable by function-pointer value. It never modifies the
+// engine's shared static vtable.
 namespace ykkz000::loader {
 namespace {
 
-// MSVC x64 隐藏返回：shared_ptr 返回经由 RDX 传入，函数需在 RAX 回传同一指针。
+// MSVC x64 hidden return: the shared_ptr return is passed via RDX, and the function must return the
+// same pointer in RAX.
 using FactoryCreateFn = void* (*)(void* self, void* outSharedPtr, const void* params);
 
 std::mutex g_recordMutex;
 std::unordered_map<std::uint32_t, EffectRecord> g_records;
 
-// 由 Loader 克隆并安装到效果对象上的 vtable 块。卸载插件时必须把插件替换过的槽
-// 还原为模板原函数，否则引擎后续调用会跳进已卸载内存（最高风险点）。
+// Vtable block cloned by the Loader and installed on the effect object. When a plugin is unloaded,
+// the slots the plugin replaced must be restored to the template original functions; otherwise a
+// later engine call jumps into unloaded memory (the highest-risk point).
 struct CloneRecord {
-  void** block = nullptr;                                    // 块首（含 RTTI 前缀槽）
-  void** clone = nullptr;                                    // 交回引擎的 vptr
+  void** block = nullptr;                                    // block start (including the RTTI prefix slot)
+  void** clone = nullptr;                                    // vptr handed back to the engine
   void* pluginHandle = nullptr;
-  std::vector<std::pair<std::size_t, const void*>> replaced; // 槽号 -> 模板函数
+  std::vector<std::pair<std::size_t, const void*>> replaced; // slot index -> template function
 };
 
 std::mutex g_cloneMutex;
@@ -55,7 +58,7 @@ int registerEffectImpl(std::uint32_t typeHash, const bridge::EffectImpl* impl,
     return -1;
   }
   EffectRecord record;
-  record.impl = *impl; // 拷贝：插件卸载后仍可安全读取
+  record.impl = *impl; // copy: still safe to read after the plugin is unloaded
   record.originalCreate = originalCreate;
   record.pluginHandle = activePluginHandle();
   std::lock_guard<std::mutex> guard(g_recordMutex);
@@ -88,7 +91,7 @@ void* patchEffectObjectSlots(void* effectObject, std::uint32_t typeHash) {
   const bool wantApply = impl.apply != nullptr && impl.templateApply != nullptr;
   const bool wantRemove = impl.remove != nullptr && impl.templateRemove != nullptr;
   if (!wantApply && !wantRemove) {
-    return nullptr; // 完全复用模板行为
+    return nullptr; // fully reuse template behavior
   }
 
   auto* source = *reinterpret_cast<void***>(effectObject);
@@ -101,7 +104,7 @@ void* patchEffectObjectSlots(void* effectObject, std::uint32_t typeHash) {
   if (block == nullptr) {
     return nullptr;
   }
-  block[0] = source[-1]; // MSVC 的 RTTI/COL 指针，必须一并保留
+  block[0] = source[-1]; // MSVC's RTTI/COL pointer, must be preserved as well
   std::memcpy(block + civ6::kVTableRttiPrefixSlots, source, sizeof(void*) * slots);
   void** clone = block + civ6::kVTableRttiPrefixSlots;
 
@@ -147,8 +150,9 @@ void* patchEffectObjectSlots(void* effectObject, std::uint32_t typeHash) {
   return block;
 }
 
-// 工厂 Create 槽替换：先调用模板 Create（参数解析与引擎一致），再按登记的实现
-// 替换对象 vtable 槽。完全泛化，不认识具体行为。
+// Factory Create slot replacement: call the template Create first (argument parsing identical to
+// the engine's), then replace the object's vtable slots per the registered implementation. Fully
+// generalized; it knows no concrete behavior.
 extern "C" void* ykkz000_customFactoryCreate(void* self, void* outSharedPtr,
                                              const void* params) {
   if (self == nullptr || outSharedPtr == nullptr) {
@@ -177,7 +181,8 @@ void teardownPluginEffects(void* pluginHandle) {
   if (pluginHandle == nullptr) {
     return;
   }
-  // 1) 还原该插件替换过的效果对象 vtable 槽（模板原函数仍指向引擎，安全）。
+  // 1) Restore the effect-object vtable slots this plugin replaced (the template original
+  //    functions still point into the engine, so this is safe).
   {
     std::lock_guard<std::mutex> guard(g_cloneMutex);
     for (CloneRecord& record : g_clones) {
@@ -191,7 +196,8 @@ void teardownPluginEffects(void* pluginHandle) {
       record.pluginHandle = nullptr;
     }
   }
-  // 2) 清空该插件登记的实现回调指针（label/userData 亦为插件内存，一并清空）。
+  // 2) Clear the implementation callback pointers this plugin registered (label/userData are also
+  //    plugin memory, cleared as well).
   {
     std::lock_guard<std::mutex> guard(g_recordMutex);
     for (auto& pair : g_records) {

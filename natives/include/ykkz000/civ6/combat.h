@@ -7,24 +7,28 @@
 #include <ykkz000/civ6/district.h>
 #include <ykkz000/civ6/unit.h>
 
+/// @file combat.h
+/// @brief Layout mirror of the combat-strength-modifier structures in the engine's GameEffects
+///   namespace.
+/// @note Describes layout only; offsets pinned by static_assert.
 namespace ykkz000::civ6 {
 
-// 引擎 GameEffects 命名空间。
+/// @brief Engine GameEffects namespace.
 struct GameEffects {
-  // 引擎 GameEffects::ProposedCombat：战斗力修正落账结构，即写入点函数
-  // AdjustPlayerStrengthModifier(PlayerTypes, int) 的 this。
-  //
-  // 落账规则（AdjustPlayerStrengthModifier 全反编译）：
-  //   - +0x00 单位非空且 unit+0x128 == playerType ⇒ +0x2C += amount；
-  //   - 否则 +0x08 区域非空且 District::Instance::GetOwner() == playerType
-  //     ⇒ +0x2C += amount；
-  //   - 均不匹配 ⇒ +0x30 += amount。
+  /// @brief Engine GameEffects::ProposedCombat: the combat-strength-modifier accounting structure,
+  ///   i.e. the this pointer of the write-point function
+  ///   AdjustPlayerStrengthModifier(PlayerTypes, int).
+  /// @note Accounting rules (full decompilation of AdjustPlayerStrengthModifier):
+  ///       - unit at +0x00 is non-null and unit+0x128 == playerType => +0x2C += amount;
+  ///       - otherwise district at +0x08 is non-null and District::Instance::GetOwner() ==
+  ///         playerType => +0x2C += amount;
+  ///       - neither matches => +0x30 += amount.
   struct ProposedCombat {
-    Unit::Instance* unit;              // 0x00: 目标单位（非空即按单位定向落账）
-    District::Instance* district;      // 0x08: 目标区域（非空则按区域所有者落账）
-    std::uint8_t unknown_0x10[0x1c];   // 0x10..0x2B: 未知
-    std::int32_t directed_total;       // 0x2C: 单位/区域定向累计
-    std::int32_t general_total;        // 0x30: 通用累计（未匹配目标单位/区域）
+    Unit::Instance* unit;              ///< 0x00: Target unit (non-null means account to that unit specifically)
+    District::Instance* district;      ///< 0x08: Target district (non-null means account to the district's owner)
+    std::uint8_t unknown_0x10[0x1c];   ///< 0x10..0x2B: Unknown
+    std::int32_t directed_total;       ///< 0x2C: Directed unit/district accumulator
+    std::int32_t general_total;        ///< 0x30: General accumulator (no target unit/district matched)
   };
 };
 

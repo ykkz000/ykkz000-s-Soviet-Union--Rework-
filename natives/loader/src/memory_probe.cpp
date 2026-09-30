@@ -7,9 +7,10 @@
 
 namespace ykkz000::loader {
 
-// 判断 [address, address+bytes) 是否落在已提交且可读的内存区域。
-// 任何来自引擎的指针在解引用前都必须先过这一步（0x14000000BE 这类伪指针
-// 只有 4 字节可读性都可能成立，因此还必须配合下面的对齐检查）。
+// Determine whether [address, address+bytes) falls within committed, readable memory.
+// Every pointer coming from the engine must pass this before being dereferenced (a pseudo-pointer
+// like 0x14000000BE may still be "4-byte readable", so this must also be combined with the
+// alignment check below).
 bool isReadableRegion(const void* address, std::size_t bytes) {
   if (address == nullptr || bytes == 0) {
     return false;
@@ -34,8 +35,9 @@ bool isReadableRegion(const void* address, std::size_t bytes) {
   return start + bytes <= regionEnd;
 }
 
-// 指针是否“像一个可解引用的对象”：非低地址、8 字节对齐、首指针可读。
-// 8 字节对齐足以滤掉 0x14000000BE 这类由两个 int32 拼出的伪指针。
+// Whether a pointer "looks like a dereferenceable object": not a low address, 8-byte aligned, and
+// its first pointer readable. 8-byte alignment is enough to filter out pseudo-pointers like
+// 0x14000000BE that are stitched together from two int32s.
 bool isCandidateObject(const void* pointer) {
   const auto value = reinterpret_cast<std::uintptr_t>(pointer);
   return value > 0x10000 && (value & 0x7) == 0 && isReadableRegion(pointer, sizeof(void*));

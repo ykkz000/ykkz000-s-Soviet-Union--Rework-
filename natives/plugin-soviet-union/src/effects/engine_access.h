@@ -3,38 +3,62 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <ykkz000/bridge.h>
+#include <ykkz000/bridge/host.h>
 #include <ykkz000/civ6/city.h>
 #include <ykkz000/civ6/game_manager.h>
 #include <ykkz000/civ6/player.h>
 #include <ykkz000/civ6/unit.h>
 
-// 插件侧引擎访问层：把宿主服务（受校验读写、玩家/城市解析）包装成类型安全的访问器。
-// Loader 不再认识任何具体行为，所有引擎读取都必须经过 host->readField 之类校验。
+/// @file engine_access.h
+/// @brief Plugin-side engine access layer.
+/// @note Wraps the host services (validated reads/writes, player/city resolution) into type-safe
+///       accessors. The Loader no longer recognizes any concrete behavior, and every engine read
+///       must go through validation such as host->readField. Pointers handed out by the engine are
+///       always treated as untrusted: run a readability/candidate check first, skip on failure, and
+///       never write to an unvalidated address.
 namespace ykkz000::plugin {
 
-// 运行时防御上限：条目数骤增或人口/玩家索引离谱通常是 self/city 指针无效的症状，
-// 此时宁可跳过写入也不要把垃圾地址写坏。
+/// @brief Runtime defensive bounds.
+/// @note A sudden jump in entry count or an absurd population/player index is usually a symptom of
+///       an invalid self/city pointer; in that case it is better to skip the write than to corrupt a
+///       garbage address.
 inline constexpr int kMaxEffectEntries = 64;
 inline constexpr int kMaxPlausiblePopulation = 100000;
 inline constexpr int kMaxPlausiblePlayerIndex = 255;
 inline constexpr int kMaxPlausibleSuzerainCount = 128;
 
-// 插件全局上下文：宿主服务与引擎入口（GetPlugin 时设置）。
+/// @brief Plugin global context: host services and engine entry points (set in GetPlugin).
 struct PluginContext {
   const bridge::Host* host = nullptr;
   const bridge::EngineApi* engine = nullptr;
 };
 
+/// @brief Sets the plugin global context.
+/// @param[in] host Host service table.
 void SetContext(const bridge::Host* host);
+/// @brief Gets the plugin global context.
+/// @return The PluginContext reference.
 [[nodiscard]] const PluginContext& Context();
 
+/// @brief Emits one log line.
+/// @param[in] level Log level.
+/// @param[in] message Text.
 void Log(int level, const char* message);
+/// @brief Formats and emits one log line (printf style).
+/// @param[in] level Log level.
+/// @param[in] format Format string.
+/// @param[in] ... Format arguments.
 void LogF(int level, const char* format, ...);
 
-// —— 成员访问层：成员引用 → 偏移，读取前一律经 host->readField 校验 ——
+// -- Member access layer: member reference -> offset; every read is validated via host->readField --
 
-// 由成员指针取字段偏移。以对齐的静态哑对象为基准取成员地址，避免对空指针取址。
+/// @brief Gets a field offset from a member pointer.
+/// @tparam TObj Object type.
+/// @tparam TField Field type.
+/// @param[in] member Member pointer.
+/// @return The field's byte offset relative to the object start.
+/// @note Takes the member address relative to an aligned static dummy object, to avoid taking the
+///       address of a null pointer.
 template <class TObj, class TField>
 [[nodiscard]] std::size_t MemberOffset(TField TObj::* member) {
   static const TObj kDummy{};
@@ -43,6 +67,13 @@ template <class TObj, class TField>
   return static_cast<std::size_t>(field - base);
 }
 
+/// @brief Reads a member field after validating it via host->readField.
+/// @tparam TObj Object type.
+/// @tparam TField Field type.
+/// @param[in] base Object base address.
+/// @param[in] member Member pointer.
+/// @param[out] out Receives the read result.
+/// @return true on success, otherwise false.
 template <class TObj, class TField>
 [[nodiscard]] bool TryRead(const void* base, TField TObj::* member, TField& out) {
   const bridge::Host* host = Context().host;
@@ -52,6 +83,13 @@ template <class TObj, class TField>
   return host->readField(base, MemberOffset(member), sizeof(TField), &out) != 0;
 }
 
+/// @brief Reads a member field after checking readability, returning fallback on failure.
+/// @tparam TObj Object type.
+/// @tparam TField Field type.
+/// @param[in] base Object base address.
+/// @param[in] member Member pointer.
+/// @param[in] fallback Value returned when the read fails.
+/// @return The field value or fallback.
 template <class TObj, class TField>
 [[nodiscard]] TField TryReadOr(const void* base, TField TObj::* member, TField fallback) {
   TField value = fallback;
@@ -59,6 +97,13 @@ template <class TObj, class TField>
   return value;
 }
 
+/// @brief Writes a member field after validating it via host->writeField.
+/// @tparam TObj Object type.
+/// @tparam TField Field type.
+/// @param[in] base Object base address.
+/// @param[in] member Member pointer.
+/// @param[in] value Value to write.
+/// @return true on success, otherwise false.
 template <class TObj, class TField>
 bool TryWrite(void* base, TField TObj::* member, const TField& value) {
   const bridge::Host* host = Context().host;
@@ -68,7 +113,12 @@ bool TryWrite(void* base, TField TObj::* member, const TField& value) {
   return host->writeField(base, MemberOffset(member), sizeof(TField), &value) != 0;
 }
 
-// 无成员类型时的裸偏移读写。
+/// @brief Raw-offset read when there is no member type (validated via host->readField).
+/// @tparam T Field type.
+/// @param[in] base Base address.
+/// @param[in] offset Field offset.
+/// @param[out] out Receives the read result.
+/// @return true on success, otherwise false.
 template <typename T>
 [[nodiscard]] bool TryReadAt(const void* base, std::size_t offset, T& out) {
   const bridge::Host* host = Context().host;
@@ -78,6 +128,12 @@ template <typename T>
   return host->readField(base, offset, sizeof(T), &out) != 0;
 }
 
+/// @brief Raw-offset write when there is no member type (validated via host->writeField).
+/// @tparam T Field type.
+/// @param[in] base Base address.
+/// @param[in] offset Field offset.
+/// @param[in] value Value to write.
+/// @return true on success, otherwise false.
 template <typename T>
 bool TryWriteAt(void* base, std::size_t offset, const T& value) {
   const bridge::Host* host = Context().host;
@@ -87,23 +143,49 @@ bool TryWriteAt(void* base, std::size_t offset, const T& value) {
   return host->writeField(base, offset, sizeof(T), &value) != 0;
 }
 
+/// @brief Determines whether [address, address+bytes) is readable.
+/// @param[in] address Start address.
+/// @param[in] bytes Length.
+/// @return true when readable.
 [[nodiscard]] bool IsReadable(const void* address, std::size_t bytes);
+/// @brief Determines whether a pointer looks like a dereferenceable object.
+/// @param[in] pointer Pointer to test.
+/// @return true when it looks like a candidate object.
 [[nodiscard]] bool IsCandidateObject(const void* pointer);
 
-// —— 玩家访问 ——
-// 引擎不在玩家上存“宗主数”：宗主关系存于每个城邦的 Player::Influence::suzerain
-// (+0x418)，遍历玩家向量统计 Influence::suzerain == 目标玩家类型者即为宗主数。
+// -- Player access --
+// The engine does not store a "suzerain count" on the player: the suzerain relation lives on each
+// city-state's Player::Influence::suzerain (+0x418), and walking the player vector counting those
+// whose Influence::suzerain == the target player type yields the suzerain count.
+
+/// @brief Gets the player-vector range.
+/// @param[out] begin Vector first pointer.
+/// @param[out] end Vector past-the-end pointer.
+/// @return true on success.
 [[nodiscard]] bool GetPlayerVector(civ6::Player::Instance**& begin,
                                    civ6::Player::Instance**& end);
-// 候选是否为玩家向量成员（精确匹配，杜绝“可读即通过”的假阳性）。
+/// @brief Whether the candidate is a member of the player vector (exact match, ruling out the
+///   "readable therefore valid" false positive).
+/// @param[in] candidate Candidate pointer.
+/// @return true when it is a member of the player vector.
 [[nodiscard]] bool IsRealPlayer(const void* candidate);
-// 在玩家向量内按 +0xD8 的玩家类型精确查找（下标不保证等于玩家类型）。
+/// @brief Exact lookup in the player vector by the player type at +0xD8.
+/// @param[in] player_id Player type id.
+/// @return The player pointer on a hit, otherwise nullptr.
+/// @note The index is not guaranteed to equal the player type.
 [[nodiscard]] void* PlayerById(int player_id);
-// 按索引直接取玩家（边界严格限制在玩家向量内）。
+/// @brief Takes a player directly by index (bounds strictly limited to the player vector).
+/// @param[in] index Vector index.
+/// @return The player pointer on a hit, otherwise nullptr.
 [[nodiscard]] void* PlayerAtIndex(int index);
-// 把任意“携带玩家类型字段”的对象解析为真玩家；via 回传命中方式供诊断。
+/// @brief Resolves any object that "carries a player-type field" into a real player.
+/// @param[in] object Candidate object.
+/// @param[out] via Returns how the match was made, for diagnostics.
+/// @return The player pointer on a hit, otherwise nullptr.
 [[nodiscard]] void* ResolvePlayerFromObject(const void* object, const char*& via);
-// 统计一名玩家所宗主的城邦数；任一环节不可信返回 -1。
+/// @brief Counts the number of city-states suzerained by one player.
+/// @param[in] player Player pointer.
+/// @return The suzerain city count; -1 when any step is untrustworthy.
 [[nodiscard]] int CountSuzerainsOfPlayer(void* player);
 
 } // namespace ykkz000::plugin

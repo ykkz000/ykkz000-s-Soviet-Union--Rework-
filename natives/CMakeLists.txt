@@ -1,41 +1,42 @@
 cmake_minimum_required(VERSION 3.21)
 project(YKKZ000Dlls LANGUAGES CXX)
 
-# 诊断用二分开关（默认关闭，仅用于定位崩溃归属）：
-# - 关闭自定义行为路径（注册时不再提供实现，退化为模板行为）
+# Diagnostic bisection switches (off by default; used only to attribute a crash):
+# - Disable the custom behavior path (no implementation supplied at registration; degrades to
+#   template behavior)
 option(YKKZ000_DISABLE_CUSTOM_BEHAVIOR
-  "注册效果时不再提供实现（禁用自定义效果路径）" OFF)
+  "Do not supply an implementation when registering effects (disables the custom effect path)" OFF)
 option(YKKZ000_DISABLE_EFFECT_HANDLER
-  "禁用效果 handler 注册（内建 handler 表 hook）" OFF)
+  "Disable effect handler registration (the built-in handler table hook)" OFF)
 option(YKKZ000_DISABLE_HANDLER_GUARD
-  "禁用 handler 派发守卫（仅供对照复现崩溃）" OFF)
+  "Disable the handler dispatch guard (for crash reproduction/control only)" OFF)
 option(YKKZ000_ENABLE_DISPATCH_TRACE
-  "启用 0x979290 通用派发 trace hook（诊断用，默认关）" OFF)
+  "Enable the 0x979290 generic dispatch trace hook (diagnostic, off by default)" OFF)
 option(YKKZ000_DISABLE_STRENGTH_PER_SUZERAIN
-  "把每宗主战斗力效果降级为模板行为（仅注册类型，不做缩放）" OFF)
+  "Degrade the per-suzerain combat strength effect to template behavior (register the type only, no scaling)" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-  message(FATAL_ERROR "仅支持 x64 构建")
+  message(FATAL_ERROR "x64 builds only")
 endif()
 
 if(MSVC)
-  # 静态 CRT：消除 VCRUNTIME140_1.dll 依赖，避免代理 DLL 在缺少新版
-  # VC++ 运行库时导致游戏无法启动。
+  # Static CRT: eliminates the VCRUNTIME140_1.dll dependency, preventing the proxy DLL from
+  # blocking game startup when a newer VC++ runtime is missing.
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
   add_compile_options(/W4 /permissive- /Zc:__cplusplus /utf-8 /EHsc)
 endif()
 
-# 便于统一取产物（非部署）
+# Convenience for collecting artifacts uniformly (not deployment)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 foreach(cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${cfg} "${CMAKE_BINARY_DIR}/bin")
 endforeach()
 
-# 共享头：INTERFACE 目标，通过链接传播 include 目录
+# Shared headers: INTERFACE target, propagates the include directory through linking
 add_library(ykkz000_bridge INTERFACE)
 target_include_directories(ykkz000_bridge INTERFACE
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")

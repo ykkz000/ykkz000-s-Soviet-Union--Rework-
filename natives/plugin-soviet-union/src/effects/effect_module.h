@@ -1,17 +1,27 @@
 #pragma once
 
-#include <ykkz000/bridge.h>
+#include <ykkz000/bridge/host.h>
 
-// 插件侧效果模块接口：把“一个自定义效果”的全部装配与生命周期收敛到一个静态实例。
-// 效果实现放各自的 .cpp 内（自行装配常驻的 EffectImpl/EffectDesc），plugin.cpp 只做
-// 清单遍历，不认识任何具体效果的名字、字段与开关。
+/// @file effect_module.h
+/// @brief Plugin-side effect module interface.
+/// @note Collapses all assembly and lifecycle of "one custom effect" into a single static
+///       instance. The effect implementation lives in its own .cpp (assembling its own resident
+///       EffectImpl/EffectDesc); plugin.cpp only iterates the manifest and knows no concrete
+///       effect's name, fields, or toggles.
 namespace ykkz000::plugin {
 
+/// @brief The three-function interface of one custom effect module.
 struct EffectModule {
-  const char* name;                                      // 诊断名
-  const bridge::EffectDesc* (*describe)(const bridge::Host& host); // 装配并由调用方注册
-  void (*on_context)(bridge::GameContextEvent event, void* context); // 可空
-  void (*shutdown)();                                    // 可空
+  const char* name; ///< Diagnostic name.
+  /// @brief Assembles the effect description, which the caller registers.
+  /// @param[in] host Host service table.
+  /// @return Pointer to the resident EffectDesc.
+  const bridge::EffectDesc* (*describe)(const bridge::Host& host);
+  /// @brief Context lifecycle callback; may be null.
+  /// @param[in] event Event type.
+  /// @param[in] context Context pointer.
+  void (*on_context)(bridge::GameContextEvent event, void* context);
+  void (*shutdown)(); ///< Unload cleanup; may be null.
 };
 
 } // namespace ykkz000::plugin

@@ -4,15 +4,21 @@
 #include <cstdint>
 #include <type_traits>
 
+/// @file district.h
+/// @brief Layout mirror of the engine's GameCore::District::Instance.
+/// @note This mod uses only its pointer and does not read business fields; offsets pinned by
+///       static_assert.
 namespace ykkz000::civ6 {
 
-// 引擎 GameCore::District::Instance（本模组只用其指针，不读业务字段）。
+/// @brief Engine GameCore::District::Instance (this mod uses only its pointer and does not read
+///   business fields).
 struct District {
   struct Instance {
-    void** vtable;                     // 0x000: 区域对象 vtable
-    std::uint8_t unknown_0x008[0xb8];  // 0x008..0x0BF: 未知
-    // 0x0C0: PlotCoord（8 字节，两个 int32）—— District::Instance::GetOwner
-    //        以 this+0xC0 查地图，再取地块所有者（Plot+0x1C 的 char）。
+    void** vtable;                     ///< 0x000: District object vtable
+    std::uint8_t unknown_0x008[0xb8];  ///< 0x008..0x0BF: Unknown
+    /// @brief 0x0C0: PlotCoord (8 bytes, two int32).
+    /// @note Evidence: District::Instance::GetOwner looks up the map with this+0xC0 and then reads
+    ///       the plot owner (the char at Plot+0x1C).
     std::uint8_t plot_coord[0x8];
   };
 };

@@ -1,11 +1,13 @@
-#include <ykkz000/bridge.h>
+#include <ykkz000/bridge/host.h>
 #include <ykkz000/export.h>
 
 #include "effects/effect_modules.h"
 #include "effects/engine_access.h"
 
-// 苏联模组的策略层：向 Loader 登记自定义 EffectType，并把上下文事件转发给各效果模块。
-// 本文件不认识任何具体效果：装配与开关都在各模块自己的 .cpp 内，这里只做清单遍历。
+// Strategy layer of the Soviet Union mod: registers the custom EffectTypes with the Loader and
+// forwards context events to each effect module.
+// This file knows no concrete effect: assembly and toggles live in each module's own .cpp; this
+// file only iterates the manifest.
 namespace {
 
 void OnGameContext(ykkz000::bridge::GameContextEvent event, void* context) {
@@ -22,7 +24,8 @@ int RegisterAll(ykkz000::bridge::Host* host) {
     if (desc == nullptr) {
       return -1;
     }
-    // registerEffectType 内部在登记后调用 desc->prepare；失败时已回滚本次注册。
+    // registerEffectType internally calls desc->prepare after registering; on failure it has
+    // already rolled back this registration.
     const int result = host->registerEffectType(desc);
     if (result != 0) {
       return result;
@@ -39,7 +42,7 @@ YKKZ000_PLUGIN_API int GetPlugin(ykkz000::bridge::Host* host) {
     return 0;
   }
   ykkz000::plugin::SetContext(host);
-  host->onGameContext = &OnGameContext; // 登记上下文回调，Loader 据此广播
+  host->onGameContext = &OnGameContext; // Register the context callback the Loader broadcasts through.
   return RegisterAll(host) == 0 ? 1 : 0;
 }
 

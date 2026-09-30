@@ -7,20 +7,23 @@
 #include <ykkz000/civ6/common.h>
 #include <ykkz000/civ6/player.h>
 
+/// @file game_manager.h
+/// @brief Layout mirror of the engine's GameManager object.
+/// @note Describes layout only; offsets pinned by static_assert.
 namespace ykkz000::civ6 {
 
-// GameManager 对象（FUN_180044d60() 返回）。
-//
-// +0x50 起是玩家指针向量，按索引取 Player::Instance*。游戏以
-// Context::Globals::EditPlayerManager() 返回同一对象（UpdateSuzerain 亦读
-// +0x50/+0x58 的玩家向量）。玩家向量下标不保证等于玩家类型，需要精确匹配时逐项
-// 读 Player::Instance::player_type 比对。
+/// @brief GameManager object (returned by FUN_180044d60()).
+/// @note Starting at +0x50 is the player pointer vector, indexed to get a Player::Instance*. The
+///       game returns the same object from Context::Globals::EditPlayerManager() (UpdateSuzerain
+///       also reads the player vector at +0x50/+0x58). A player-vector index is not guaranteed to
+///       equal the player type, so when an exact match is needed, compare
+///       Player::Instance::player_type item by item.
 struct GameManager {
-  void** vtable;                                // 0x00: 对象 vtable
-  std::uint8_t unknown_0x08[0x48];              // 0x08..0x4F: 未知
-  VectorView<Player::Instance*> players;        // 0x50: 玩家指针向量（begin/end/capacity）
-  std::uint8_t unknown_0x68[0x1068];            // 0x68..0x10CF: 未知
-  VectorView<void*> unknown_vector_0x10d0;      // 0x10D0: 另一向量（元素 8 字节，未验证）
+  void** vtable;                                ///< 0x00: Object vtable
+  std::uint8_t unknown_0x08[0x48];              ///< 0x08..0x4F: Unknown
+  VectorView<Player::Instance*> players;        ///< 0x50: Player pointer vector (begin/end/capacity)
+  std::uint8_t unknown_0x68[0x1068];            ///< 0x68..0x10CF: Unknown
+  VectorView<void*> unknown_vector_0x10d0;      ///< 0x10D0: Another vector (8-byte elements, unverified)
 };
 
 static_assert(std::is_standard_layout_v<GameManager>);

@@ -21,7 +21,7 @@ DestroyGameContextFn g_realDestroy = nullptr;
 TelemetryHashFn g_realTelemetryHash = nullptr;
 bridge::Host g_host = {};
 
-// —— 暴露给插件的受校验读写（bridge::Host 服务）——
+// -- Validated reads/writes exposed to plugins (bridge::Host services) --
 int hostReadField(const void* base, std::size_t offset, std::size_t bytes, void* out) {
   if (base == nullptr || out == nullptr || bytes == 0) {
     return 0;
@@ -55,7 +55,7 @@ int hostIsReadableRegion(const void* address, std::size_t bytes) {
 }
 
 bool initialize() {
-  installCrashCapture();  // 尽早安装，保证之后任何崩溃都能记录
+  installCrashCapture();  // install as early as possible so any later crash is recorded
   LogScope scope("initialize");
   {
     LogScope s("resolve real GameCore");
@@ -80,8 +80,9 @@ bool initialize() {
     return false;
   }
 
-  // 效果 handler 注册：必须在真实 DllCreateGameContext 之前安装 hook，才能捕获
-  // 游戏上下文构造期间建立的内建 handler 表并补登自定义效果。
+  // Effect handler registration: the hooks must be installed before the real DllCreateGameContext,
+  // so that the built-in handler tables constructed while the game context is created are captured
+  // and custom effects are re-registered.
   const bool handlerHookReady = installEffectHandlerHook();
   logMessageF(1, "effect handler hook ready=%d", handlerHookReady ? 1 : 0);
 
@@ -100,12 +101,12 @@ bool initialize() {
     g_host.writeField = &hostWriteField;
     g_host.isCandidateObject = &hostIsCandidateObject;
     g_host.isReadableRegion = &hostIsReadableRegion;
-    g_host.onGameContext = nullptr; // 由各插件在自己的 Host 副本中登记
-    g_host.pluginHandle = nullptr;  // 由每个插件的 Host 副本填入
+    g_host.onGameContext = nullptr; // registered by each plugin in its own Host copy
+    g_host.pluginHandle = nullptr;  // filled in by each plugin's Host copy
   }
 
-  // 必须在真实 DllCreateGameContext 之前完成注册：其后会触发
-  // ModifierLibrary::Initialize 与 DatabaseWriter::WriteEffectData。
+  // Registration must complete before the real DllCreateGameContext: it subsequently triggers
+  // ModifierLibrary::Initialize and DatabaseWriter::WriteEffectData.
   {
     LogScope s("load plugins");
     loadPlugins(&g_host);
@@ -127,8 +128,9 @@ bool loaderInitialized() {
 void* createGameContext() {
   LogScope scope("create game context");
   initializeLoaderOnce();
-  // 通知插件：新上下文建立。插件在此重新安装/启用自身的 hook 并清空随上下文失效
-  // 的缓存；Loader 不再识别任何具体行为，故不再有 install*IfNeeded()。
+  // Notify plugins: a new context is being created. Plugins reinstall/re-enable their own hooks
+  // here and clear caches that become invalid with the context; the Loader no longer recognizes any
+  // concrete behavior, so there is no install*IfNeeded() anymore.
   notifyPluginsGameContext(bridge::GameContextEvent::kCreated, nullptr);
   (void)installEffectHandlerHook();
   if (g_realCreate == nullptr) {
@@ -140,20 +142,22 @@ void* createGameContext() {
 
 void destroyGameContext(void* context) {
   LogScope scope("destroy game context");
-  // 必须在真实 destroy 之前：此时 handler root 仍有效，可安全摘掉我们登记的节点，
-  // 否则引擎关停阶段会调用到不成立的 handler 而崩溃（见退出崩溃分析）。
+  // Must precede the real destroy: the handler root is still valid here, so our registered nodes
+  // can be safely detached; otherwise the engine shutdown phase would call a handler that no longer
+  // exists and crash (see the exit-crash analysis).
   removeCustomEffectHandlers();
   if (g_realDestroy != nullptr) {
     LogScope call("call real DllDestroyGameContext");
     g_realDestroy(context);
   }
-  // 上下文已销毁：通知插件停用 hook、清理缓存。
+  // The context has been destroyed: notify plugins to disable hooks and clear caches.
   //
-  // 注意：插件 DLL 保持加载，不在此处卸载。游戏在主菜单与对局之间会反复
-  // create/destroy 上下文，而效果注册只发生一次（注册必须早于 ModifierLibrary::
-  // Initialize），卸载后无法在下一个上下文重新注册。插件随进程一起存活；真正需要
-  // 卸载时（进程退出）由 unloadPlugins() 按“先通知、再兜底还原、后 FreeLibrary”
-  // 的顺序处理。
+  // Note: the plugin DLLs stay loaded and are not unloaded here. The game repeatedly
+  // creates/destroys contexts between the main menu and a match, whereas effect registration
+  // happens only once (registration must precede ModifierLibrary::Initialize), so a plugin could
+  // not re-register in the next context after being unloaded. Plugins live for the whole process;
+  // when a real unload is needed (process exit), unloadPlugins() handles it in the order
+  // "notify first, then fallback restore, then FreeLibrary".
   notifyPluginsGameContext(bridge::GameContextEvent::kDestroyed, context);
   uninstallEffectHandlerHook();
 }

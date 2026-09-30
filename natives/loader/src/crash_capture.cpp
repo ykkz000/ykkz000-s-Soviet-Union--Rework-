@@ -12,26 +12,28 @@
 
 #include "loader_internal.h"
 
-// —— 崩溃现场抓取（VEH）——
-// 要求：不依赖堆、不依赖调试器；只追加写一个小文件。
+// -- Crash-context capture (VEH) --
+// Requirements: no heap dependency, no debugger dependency; only append to a small file.
 namespace ykkz000::loader {
 
-// 本线程是否正在执行一次受 SEH 保护的引擎调用。VEH 据此静默放行可恢复异常，交给
-// 该调用的 __except 接管，避免把探测性访问违例当成致命崩溃写进 YKKZ000_crash.log。
-// 当前无使用者（宗主数改为纯内存遍历），保留供日后加入不可信引擎调用时复用。
+// Whether this thread is currently executing an SEH-guarded engine call. The VEH uses this to
+// silently pass through recoverable exceptions, handing them to that call's __except and avoiding
+// writing probing access violations into YKKZ000_crash.log as fatal crashes.
+// Currently unused (the suzerain count was changed to a pure in-memory walk); kept for reuse if
+// untrusted engine calls are added later.
 thread_local bool g_guardedCallActive = false;
 
 namespace {
 
 constexpr std::size_t kMaxPathChars = 512;
-constexpr int kCrashStackQwords = 64;      // 打印 Rsp 起的前 N 个 qword
+constexpr int kCrashStackQwords = 64;      // print the first N qwords starting at Rsp
 constexpr int kCrashBackTraceFrames = 48;
-constexpr long kMaxCrashRecords = 8;       // 最多记录多少次异常，避免刷屏
+constexpr long kMaxCrashRecords = 8;       // cap how many exceptions are recorded, to avoid spam
 
 std::atomic<long> s_crashRecords{0};
 PVOID g_vehHandle = nullptr;
 
-// 判定“看起来是可读地址”（崩溃现场下最轻量的保护）
+// Determine whether an address "looks readable" (the lightest protection in a crash context)
 bool crashReadable(const void* address, std::size_t size) {
   if (address == nullptr) {
     return false;
@@ -66,7 +68,7 @@ T crashRead(const void* base, std::size_t offset, T fallback = T{}) {
   return value;
 }
 
-// 崩溃日志文件：<Loader 所在目录>\YKKZ000_crash.log（与常规日志分开）
+// Crash log file: <Loader directory>\YKKZ000_crash.log (kept separate from the regular log)
 const wchar_t* crashLogPath() {
   static wchar_t path[kMaxPathChars] = {};
   static bool resolved = false;
@@ -94,7 +96,7 @@ const wchar_t* crashLogPath() {
   return path;
 }
 
-// 只用栈缓冲 + CreateFileW/WriteFile，避免崩溃时触碰 CRT 堆
+// Use only stack buffers + CreateFileW/WriteFile, to avoid touching the CRT heap during a crash
 void crashWrite(const char* text, std::size_t length) {
   if (text == nullptr || length == 0) {
     return;
@@ -122,7 +124,7 @@ void crashWriteF(const char* format, ...) {
   crashWrite(buffer, std::strlen(buffer));
 }
 
-// 打印全部模块的 base/大小（用于把栈地址换算成 RVA）
+// Print every module's base/size (used to convert stack addresses into RVAs)
 void crashLogModules() {
   const HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32,
                                                     GetCurrentProcessId());
@@ -142,7 +144,7 @@ void crashLogModules() {
 }
 
 void crashLogStack(const CONTEXT* context) {
-  // 1) 原始栈（每个值先做可读校验）
+  // 1) Raw stack (each value is readability-checked first)
   const auto* sp = reinterpret_cast<const std::uint64_t*>(context->Rsp);
   for (int i = 0; i < kCrashStackQwords; ++i) {
     const auto* address = sp + i;
@@ -152,7 +154,8 @@ void crashLogStack(const CONTEXT* context) {
     }
     crashWriteF("!! stack[%02d]=%p\n", i, reinterpret_cast<void*>(*address));
   }
-  // 2) 返回地址链（VEH 运行在故障线程上，栈下方就是故障现场）
+  // 2) Return-address chain (the VEH runs on the faulting thread, so the fault context is just
+  //    below this stack)
   void* frames[kCrashBackTraceFrames] = {};
   const USHORT captured = CaptureStackBackTrace(2, kCrashBackTraceFrames, frames, nullptr);
   for (USHORT i = 0; i < captured; ++i) {
@@ -166,11 +169,12 @@ LONG CALLBACK CrashCapture_Handler(PEXCEPTION_POINTERS info) {
       info->ContextRecord == nullptr) {
     return EXCEPTION_CONTINUE_SEARCH;
   }
-  // 受 SEH 保护的探测调用：不记录、不拦截，放行给该调用的 __except。
+  // SEH-guarded probing call: do not record and do not intercept; pass it to that call's __except.
   if (g_guardedCallActive) {
     return EXCEPTION_CONTINUE_SEARCH;
   }
-  // 只关心“真崩溃”类异常，避免把正常 SEH/断点刷满日志
+  // Only care about "true crash" classes of exception, to avoid flooding the log with normal
+  // SEH/breakpoints
   const DWORD code = info->ExceptionRecord->ExceptionCode;
   const bool interesting =
       (code == 0xC0000005) ||      // ACCESS_VIOLATION
@@ -178,7 +182,7 @@ LONG CALLBACK CrashCapture_Handler(PEXCEPTION_POINTERS info) {
       (code == 0xC0000094) ||      // INTEGER_DIVIDE_BY_ZERO
       (code == 0xC0000096) ||      // PRIVILEGED_INSTRUCTION
       (code == 0xC00000FD) ||      // STACK_OVERFLOW
-      (code & 0x80000000u) != 0;   // 其它严重异常
+      (code & 0x80000000u) != 0;   // other severe exceptions
   const bool nonContinuable =
       (info->ExceptionRecord->ExceptionFlags & EXCEPTION_NONCONTINUABLE) != 0;
   if (!interesting && !nonContinuable) {
@@ -206,7 +210,8 @@ LONG CALLBACK CrashCapture_Handler(PEXCEPTION_POINTERS info) {
               reinterpret_cast<void*>(ctx->Rcx), reinterpret_cast<void*>(ctx->Rdx),
               reinterpret_cast<void*>(ctx->R8), reinterpret_cast<void*>(ctx->R9));
 
-  // 若 rcx 是那个“节点/对象”，直接解出 hash 与 handler（本崩溃最关键的信息）
+  // If rcx is that "node/object", decode the hash and handler directly (the most critical info for
+  // this crash)
   const void* node = reinterpret_cast<const void*>(ctx->Rcx);
   if (crashReadable(node, 0x20)) {
     crashWriteF("!! node=%p hash=0x%08X handler=%p\n", node,
@@ -221,7 +226,7 @@ LONG CALLBACK CrashCapture_Handler(PEXCEPTION_POINTERS info) {
       }
     }
   }
-  // 若 rax 是“对象/虚表”，也解一下（故障指令是 jmp [rax+0x30]）
+  // If rax is an "object/vtable", decode it too (the faulting instruction is jmp [rax+0x30])
   const void* rax = reinterpret_cast<const void*>(ctx->Rax);
   if (crashReadable(rax, 0x38)) {
     crashWriteF("!! rax=%p [rax]=%p [rax+0x30]=%p\n", rax, crashRead<void*>(rax, 0),
@@ -231,8 +236,9 @@ LONG CALLBACK CrashCapture_Handler(PEXCEPTION_POINTERS info) {
   crashLogStack(ctx);
   crashLogModules();
 
-  // 可选：保持进程存活，便于“任务管理器 → 创建转储文件”
-  //   用法：设置环境变量 YKKZ000_CRASH_HOLD_MS（毫秒），例如 300000 表示保持 5 分钟。
+  // Optional: keep the process alive to ease "Task Manager -> Create dump file".
+  //   Usage: set the environment variable YKKZ000_CRASH_HOLD_MS (milliseconds); for example,
+  //   300000 holds for 5 minutes.
   wchar_t hold[32] = {};
   if (GetEnvironmentVariableW(L"YKKZ000_CRASH_HOLD_MS", hold, 32) > 0) {
     const DWORD milliseconds = static_cast<DWORD>(_wtoi(hold));
@@ -243,16 +249,16 @@ LONG CALLBACK CrashCapture_Handler(PEXCEPTION_POINTERS info) {
   }
 
   inHandler = false;
-  return EXCEPTION_CONTINUE_SEARCH;  // 只观察，不改变崩溃行为
+  return EXCEPTION_CONTINUE_SEARCH;  // observe only; do not change crash behavior
 }
 
 } // namespace
 
 void installCrashCapture() {
   if (g_vehHandle != nullptr) {
-    return; // 幂等
+    return; // idempotent
   }
-  // 1 = 最先被调用（在引擎的 SEH 之前拿到异常）
+  // 1 = called first (captures the exception before the engine's SEH)
   g_vehHandle = AddVectoredExceptionHandler(
       1, reinterpret_cast<PVECTORED_EXCEPTION_HANDLER>(&CrashCapture_Handler));
   if (g_vehHandle != nullptr) {
@@ -263,7 +269,8 @@ void installCrashCapture() {
 }
 
 void uninstallCrashCapture() {
-  // 注意：可能在 DllMain(DLL_PROCESS_DETACH) 的 loader lock 下调用，禁止记录日志。
+  // Note: may be called under the loader lock in DllMain(DLL_PROCESS_DETACH); logging is
+  // forbidden there.
   if (g_vehHandle != nullptr) {
     RemoveVectoredExceptionHandler(g_vehHandle);
     g_vehHandle = nullptr;

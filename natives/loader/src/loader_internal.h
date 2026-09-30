@@ -8,89 +8,133 @@
 #include <string>
 #include <vector>
 
-#include <ykkz000/bridge.h>
+#include <ykkz000/bridge/host.h>
 #include <ykkz000/civ6/common.h>
 #include <ykkz000/civ6/effect.h>
 #include <ykkz000/civ6/factory.h>
 #include <ykkz000/civ6/handler.h>
 
+/// @file loader_internal.h
+/// @brief Loader-internal shared declarations: engine entry-point resolution, hook service,
+///        memory probing, effect mechanism, and plugin management.
+/// @note For use only by the Loader's own .cpp files (not a plugin ABI).
 namespace ykkz000::loader {
 
-// —— 引擎侧布局 ——
-// 布局的单一事实来源是 <ykkz000/civ6/*.h>：那里以 POD 数据成员 + static_assert
-// 锁定每个已知偏移与大小，并以 vtable 槽位常量取代裸数字。调用点必须引用那里的
-// 类型（offsetof / sizeof / 槽位常量），不得再写字段偏移字面量。
-// 本命名空间只保留“机制常量”（克隆宽度、注册表 kind 等，均非行为策略）。
+// -- Engine-side layout --
+// The single source of truth for layout is <ykkz000/civ6/*.h>: there, POD data members plus
+// static_assert lock down every known offset and size, and vtable slot constants replace raw
+// numbers. Call sites must reference those types (offsetof / sizeof / slot constants) and must
+// not write field-offset literals again.
+// This namespace keeps only "mechanism constants" (clone widths, registry kind, etc.), none of
+// which are behavior policy.
 
-// 克隆宽度（机制常量，非布局）：效果对象 vtable 需覆盖 Apply/Remove 及析构槽，
-// 64 槽远大于实际接口宽度，用于按函数指针定位并替换；handler 描述表取 16 槽留余量。
+/// @brief Effect-object vtable clone width (mechanism constant, not layout).
+/// @note Must cover the Apply/Remove and destructor slots; 64 slots is far wider than the actual
+///       interface width, and is used to locate and replace slots by function pointer.
 constexpr std::size_t kEffectVTableCloneSlots = 64;
+/// @brief Handler descriptor-table clone width (16 slots leaves headroom).
 constexpr std::size_t kHandlerTableCloneSlots = 16;
 
-// 处理器注册表 kind：效果表（对应 civ6::HandlerRegistryRoot::effects）。
+/// @brief Handler registry kind: effect table (corresponds to civ6::HandlerRegistryRoot::effects).
 constexpr int kHandlerKindEffects = 2;
 
 extern HMODULE g_selfModule;
 
-// 引擎内部函数指针类型（仅本 DLL 内部使用）。
-using GetGameManagerFn = void* (*)(); // FUN_180044d60() -> GameManager*
+/// @brief Engine-internal function pointer type (used only inside this DLL).
+/// @return GameManager* (FUN_180044d60()).
+using GetGameManagerFn = void* (*)();
 
-// 真实 GameCore 中被特征扫描解析出的内部入口。
+/// @brief Internal entry points in the real GameCore resolved by signature scanning.
 struct GameCoreApi {
   HMODULE module = nullptr;
-  void*   getEffectRegistry = nullptr; // Registry<IModifierEffectFactory>::GetTypes()
-  void*   mallocTemp = nullptr;        // Platform::MallocTemp(size, file, line, a, b)
-  void*   reserveVector = nullptr;     // std::vector::_Reserve(count) 成员函数
-  void*   effectApply = nullptr;       // Effects::AdjustCityYieldModifier::Apply
-  void*   effectRemove = nullptr;      // Effects::AdjustCityYieldModifier::Remove
-  // 玩家单位战斗力修正模板（可选：缺失时“每宗主”行为退化为不缩放）。
-  void*   effectStrengthApply = nullptr;  // Effects::AdjustPlayerStrengthModifier::Apply
-  void*   effectStrengthRemove = nullptr; // Effects::AdjustPlayerStrengthModifier::Remove
-  void*   getPlayerByIndex = nullptr;     // 保留：FUN_180044f00(int)（无边界检查，不用）
-  void*   getGameManager = nullptr;       // FUN_180044d60() -> GameManager*
-  void*   strengthAccumulate = nullptr;   // FUN_180944040(target, playerId, amount)：引擎把
-                                          // 战斗力修正落到玩家桶的写入点；playerId 是引擎
-                                          // 自己解析出的权威玩家标识
-  void*   changeYieldModifier = nullptr; // City::Instance::ChangeYieldModifier(YieldTypes, int)
-  // 城市产出读取路径（可选：缺失时“每市民百分比”效果退化为不缩放）。
-  // City::Instance::CalculateYield(YieldTypes, TypeHash, bool) -> TrackedValue（sret）。
+  void*   getEffectRegistry = nullptr; ///< Registry<IModifierEffectFactory>::GetTypes()
+  void*   mallocTemp = nullptr;        ///< Platform::MallocTemp(size, file, line, a, b)
+  void*   reserveVector = nullptr;     ///< std::vector::_Reserve(count) member function
+  void*   effectApply = nullptr;       ///< Effects::AdjustCityYieldModifier::Apply
+  void*   effectRemove = nullptr;      ///< Effects::AdjustCityYieldModifier::Remove
+  /// @note Player-unit combat-strength modifier template (optional: when missing, the
+  ///       "per suzerain" behavior degrades to no scaling).
+  ///       Effects::AdjustPlayerStrengthModifier::Apply / Remove.
+  void*   effectStrengthApply = nullptr;
+  void*   effectStrengthRemove = nullptr;
+  void*   getPlayerByIndex = nullptr;  ///< Reserved: FUN_180044f00(int) (no bounds check; unused)
+  void*   getGameManager = nullptr;    ///< FUN_180044d60() -> GameManager*
+  /// @note FUN_180944040(target, playerId, amount): the engine's write point that lands the
+  ///       combat-strength modifier into the player's bucket; playerId is the authoritative
+  ///       player identity the engine itself resolved.
+  void*   strengthAccumulate = nullptr;
+  void*   changeYieldModifier = nullptr; ///< City::Instance::ChangeYieldModifier(YieldTypes, int)
+  /// @note City yield read path (optional: when missing, the "percent per citizen" effect
+  ///       degrades to no scaling).
+  ///       City::Instance::CalculateYield(YieldTypes, TypeHash, bool) -> TrackedValue (sret).
   void*   cityCalculateYield = nullptr;
-  // TrackedValue::AddStep(this=修正子对象, step, u32=0, u32=0, tooltipKey)：修正明细
-  // 追加入口（step 布局见 civ6::YieldValue，第 5 实参在栈上传入本地化键）。
+  /// @note TrackedValue::AddStep(this=modifier sub-object, step, u32=0, u32=0, tooltipKey):
+  ///       modifier-detail append entry (step layout in civ6::YieldValue; the fifth argument
+  ///       passes the localization key on the stack).
   void*   trackedValueAddStep = nullptr;
-  // 处理器注册：handlerRegistryInit/setEffectHandler/handlerNodeInsert 为代码；后两者指向引擎数据。
-  void*   handlerRegistryInit = nullptr;   // FUN_1804891b0(root)：建立内建 handler 表
-  void*   setEffectHandler = nullptr;      // FUN_1806083f0(root, kind, hash, handlerObj)
-  void*   handlerNodeInsert = nullptr;     // FUN_180489040(container, outNode, hashPtr)
-  // 数据类 RVA：未经运行期校验，勿用于登记（保留仅作诊断）。各次运行间对不上，
-  // 真实对象改由 handlerNodeInsert 在运行期从引擎注册表捕获（见 effect_handler.cpp）。
-  void*   templateEffectHandler = nullptr; // EFFECT_ADJUST_CITY_YIELD_MODIFIER 的 handler 对象
-  void*   templateHandlerTable = nullptr;  // 其描述表（克隆/替换 apply 用）
-  // 模板描述表的两个槽（仅诊断用：确认自定义效果是否走到 handler 应用路径）：
-  void*   templateAnalyze = nullptr;       // 槽 0：FUN_18046b0d0(self, args)
-  void*   templateApply = nullptr;         // 槽 1：FUN_18046b390(self, context, args)
-  // handler 派发 thunk（RVA 0x979290）：rcx=[rcx+0x18]; jmp [rax+0x30]。可选入口，
-  // 缺失仅跳过对应 hook（诊断 + 无效 handler 守卫）。
+  /// @note Handler registration entries: handlerRegistryInit/setEffectHandler/handlerNodeInsert are
+  ///       code. FUN_1804891b0(root) builds the built-in handler tables.
+  void*   handlerRegistryInit = nullptr;
+  void*   setEffectHandler = nullptr;  ///< FUN_1806083f0(root, kind, hash, handlerObj)
+  void*   handlerNodeInsert = nullptr; ///< FUN_180489040(container, outNode, hashPtr)
+  /// @note Build-profile data RVAs: not runtime-validated, must not be used for registration
+  ///       (diagnostics only). They do not match across runs; the real objects are captured at
+  ///       runtime from the engine registry via handlerNodeInsert (see effect_handler.cpp). These are
+  ///       profile data describing the profiled template's handler, not evidence that the Loader
+  ///       recognizes any particular effect.
+  void*   profiledHandlerData = nullptr;  ///< profiled handler object (data)
+  void*   profiledHandlerTable = nullptr; ///< its descriptor table (used to clone/replace apply)
+  /// @note The profiled handler table's two slots (diagnostics only: to confirm whether a custom
+  ///       effect reaches the handler apply path): slot 0: FUN_18046b0d0(self, args); slot 1:
+  ///       FUN_18046b390(self, context, args).
+  void*   profiledHandlerAnalyze = nullptr;
+  void*   profiledHandlerApply = nullptr;
+  /// @note handler dispatch thunk (RVA 0x979290): rcx=[rcx+0x18]; jmp [rax+0x30]. Optional
+  ///       entry; when missing, only the corresponding hook is skipped (diagnostics + invalid
+  ///       handler guard).
   void*   effectHandlerDispatch = nullptr;
 };
 
+/// @brief Get this DLL's directory.
+/// @return Module directory path.
 [[nodiscard]] std::wstring moduleDirectory();
+/// @brief Ensure the GameCore module is loaded.
+/// @return true on success.
 [[nodiscard]] bool ensureGameCoreLoaded();
+/// @brief Get the resolved GameCore entry-point set.
+/// @return Reference to GameCoreApi.
 [[nodiscard]] const GameCoreApi& gameCore();
-// 引擎入口集合（在 gameCore 解析成功后填充；未经解析时字段为 null）。
+/// @brief Engine entry-point set (populated after gameCore resolves successfully; fields are
+///        null before resolution).
 [[nodiscard]] const bridge::EngineApi& engineApi();
 
+/// @brief Compute a string hash (same algorithm as the engine's MakeHash).
+/// @param[in] text Input text.
+/// @return 32-bit hash.
 [[nodiscard]] std::uint32_t makeHash(const char* text);
+/// @brief Emit one log line (narrow string).
+/// @param[in] level Log level.
+/// @param[in] message Text.
 void logMessage(int level, const char* message);
+/// @brief Emit one log line (wide string).
+/// @param[in] level Log level.
+/// @param[in] message Text.
 void logMessage(int level, const std::wstring& message);
+/// @brief Format a printf-style message and emit it to the log.
+/// @param[in] level Log level.
+/// @param[in] format Format string.
+/// @param[in] ... Format arguments.
 void logMessageF(int level, const char* format, ...);
 
-// 阶段日志：构造输出 "BEGIN: <stage>"，析构输出 "END: <stage>"。
+/// @brief Stage log: the constructor emits "BEGIN: <stage>", the destructor emits "END: <stage>".
 class LogScope {
  public:
+  /// @brief Enter the stage; emits the BEGIN log.
+  /// @param[in] stage Stage name (must stay valid for the LogScope lifetime).
   explicit LogScope(const char* stage) : stage_(stage) {
     logMessage(1, (std::string("BEGIN: ") + stage_).c_str());
   }
+  /// @brief Leave the stage; emits the END log.
   ~LogScope() { logMessage(1, (std::string("END: ") + stage_).c_str()); }
   LogScope(const LogScope&) = delete;
   LogScope& operator=(const LogScope&) = delete;
@@ -100,48 +144,99 @@ class LogScope {
 };
 
 // registry.cpp
+/// @brief Register one custom effect type.
+/// @param[in] desc Effect descriptor (see bridge::EffectDesc).
+/// @return 0 on success, non-zero on failure.
 [[nodiscard]] int registerEffectType(const bridge::EffectDesc* desc);
 
-// 已成功注册的 EffectType 记录，供效果 handler 注册使用（typeName 为本副本，
-// 不依赖已可能卸载的插件模块）。
+/// @brief Record of a successfully registered EffectType, used for effect-handler registration.
+/// @note typeName is this copy, so it does not rely on a plugin module that may already be
+///       unloaded.
 struct RegisteredEffect {
   std::uint32_t hash = 0;
   std::uint32_t templateHash = 0;
   std::string typeName;
 };
+/// @brief Get a snapshot of the registered effect records.
+/// @return Vector of records.
 [[nodiscard]] std::vector<RegisteredEffect> registeredEffects();
-// 判定给定哈希是否为某个已注册自定义效果所复用的模板效果哈希（供 handler
-// 节点捕获时按模板分别记录）。
+/// @brief Determine whether the given hash is a template-effect hash reused by some registered
+///        custom effect.
+/// @param[in] hash Hash to test.
+/// @return true if it is a template hash.
+/// @note Lets handler-node captures be recorded per template.
 [[nodiscard]] bool isRegisteredTemplateHash(std::uint32_t hash);
-// 判定给定哈希是否为某个已注册自定义效果本身的类型哈希（工厂对象 +0x08），用于在
-// 模板 Create 旁路诊断中区分“引擎内置对象”与“我们克隆出的对象”。
+/// @brief Determine whether the given hash is the type hash of some registered custom effect
+///        itself (factory object +0x08).
+/// @param[in] typeHash Hash to test.
+/// @return true if it is a registered hash.
+/// @note Used in template-Create bypass diagnostics to distinguish "engine built-in objects" from
+///       "objects we cloned".
 [[nodiscard]] bool isRegisteredHash(std::uint32_t typeHash);
 
-// hook_service.cpp：进程内唯一 MinHook 实例的初始化入口（幂等），供 Loader 自身
-// 的机制 hook 与插件 hook 服务共用。
+/// @brief hook_service.cpp: initialization entry for the process-wide single MinHook instance
+///        (idempotent).
+/// @return true if initialized.
+/// @note Shared by the Loader's own mechanism hooks and the plugin hook service.
 [[nodiscard]] bool ensureHookServiceInitialized();
 
-// hook_service.cpp：Loaders 自身的机制 hook（无归属登记，不随插件卸载撤销）。
+// hook_service.cpp: the Loader's own mechanism hooks (no ownership registration; not revoked
+// when a plugin unloads).
+/// @brief Install a Loader mechanism hook (no ownership registration).
+/// @param[in] target Target address.
+/// @param[in] detour Replacement function.
+/// @param[out] original Receives the original function pointer.
+/// @return 0 on success, non-zero on failure.
 int installHookRaw(void* target, void* detour, void** original);
+/// @brief Remove a Loader mechanism hook.
+/// @param[in] target Target address.
+/// @return 0 on success, non-zero on failure.
 int removeHookRaw(void* target);
 
-// hook_service.cpp：插件 hook 服务，按 pluginHandle 登记归属。
+// hook_service.cpp: plugin hook service, ownership registered by pluginHandle.
+/// @brief Plugin hook install service (ownership registered by pluginHandle).
+/// @param[in] pluginHandle Owning plugin handle.
+/// @param[in] target Target address.
+/// @param[in] detour Replacement function.
+/// @param[out] original Receives the original function pointer.
+/// @return 0 on success, non-zero on failure.
 int serviceInstallHook(void* pluginHandle, void* target, void* detour, void** original);
+/// @brief Plugin hook remove service.
+/// @param[in] pluginHandle Owning plugin handle.
+/// @param[in] target Target address.
+/// @return 0 on success, non-zero on failure.
 int serviceRemoveHook(void* pluginHandle, void* target);
-// 兜底撤销：移除该插件登记但尚未撤销的全部 hook。
+/// @brief Fallback revocation: remove every hook registered by this plugin that has not yet been
+///        revoked.
+/// @param[in] pluginHandle Owning plugin handle.
 void removeHooksForPlugin(void* pluginHandle);
-// 调用期批次：registerEffectType 调用插件 prepare 前开启、调用后关闭；rollback 为真时
-// 移除批次内新建的全部 hook（prepare 失败的兜底，主责仍是插件自行撤销）。
+/// @brief Call-time batch: opened before registerEffectType calls the plugin prepare, closed
+///        after the call.
 void beginHookScope();
+/// @brief Close the call-time batch.
+/// @param[in] rollback When true, removes every hook newly created within the batch.
+/// @note Fallback for a failed prepare; the primary responsibility remains the plugin revoking
+///       its own hooks.
 void endHookScope(bool rollback);
 
 // memory_probe.cpp
-// 判定 [address, address+bytes) 是否落在已提交且可读的内存区域。
+/// @brief Determine whether [address, address+bytes) falls within committed, readable memory.
+/// @param[in] address Start address.
+/// @param[in] bytes Length.
+/// @return true if readable.
 [[nodiscard]] bool isReadableRegion(const void* address, std::size_t bytes);
-// 判定指针是否像一个可解引用的对象（非低地址、8 字节对齐、首指针可读）。
+/// @brief Determine whether a pointer looks like a dereferenceable object (not a low address,
+///        8-byte aligned, first pointer readable).
+/// @param[in] pointer Pointer to test.
+/// @return true if it looks like a candidate object.
 [[nodiscard]] bool isCandidateObject(const void* pointer);
 
-// 只有通过 isReadableRegion 校验才读取字段；失败返回 false 且不改动 out。
+/// @brief Read a field only after isReadableRegion validates it.
+/// @tparam T Field type.
+/// @param[in] base Base address.
+/// @param[in] offset Field offset.
+/// @param[out] out Receives the read result.
+/// @return true on success; false on failure without modifying out.
 template <typename T>
 [[nodiscard]] bool tryReadField(const void* base, std::size_t offset, T& out) {
   if (base == nullptr) {
@@ -155,12 +250,18 @@ template <typename T>
   return true;
 }
 
-// —— 成员访问层：把“成员引用”翻译成偏移 ——
-// 调用点用 (&civ6::X::field) 表达字段，偏移由 <ykkz000/civ6/*.h> 的布局决定；
-// 引擎指针仍先经 isReadableRegion 校验，未通过则不改动内存。
+// -- Member access layer: translate "member references" into offsets --
+// Call sites express fields with (&civ6::X::field); the offset is decided by the layout in
+// <ykkz000/civ6/*.h>. Engine pointers are still validated with isReadableRegion first; when that
+// fails, memory is left untouched.
 
-// 由成员指针取字段偏移。以对齐的静态哑对象为基准取成员地址，避免对空指针取址；
-// 全程只做地址相减，不读取任何成员。
+/// @brief Get a field's offset from a member pointer.
+/// @tparam TObj Object type.
+/// @tparam TField Field type.
+/// @param[in] member Member pointer.
+/// @return Byte offset of the field relative to the object start.
+/// @note Takes the member address against an aligned static dummy object, avoiding taking the
+///       address of a null pointer; only address arithmetic is performed, no member is read.
 template <class TObj, class TField>
 [[nodiscard]] std::size_t MemberOffset(TField TObj::* member) {
   static const TObj kDummy{};
@@ -169,13 +270,25 @@ template <class TObj, class TField>
   return static_cast<std::size_t>(field - base);
 }
 
-// 校验可读后读取成员字段；失败返回 false 且不改动 out。
+/// @brief Read a member field after validating readability.
+/// @tparam TObj Object type.
+/// @tparam TField Field type.
+/// @param[in] base Object base address.
+/// @param[in] member Member pointer.
+/// @param[out] out Receives the read result.
+/// @return true on success; false on failure without modifying out.
 template <class TObj, class TField>
 [[nodiscard]] bool TryRead(const void* base, TField TObj::* member, TField& out) {
   return tryReadField(base, MemberOffset(member), out);
 }
 
-// 校验可读后读取成员字段，失败返回 fallback。
+/// @brief Read a member field after validating readability, returning fallback on failure.
+/// @tparam TObj Object type.
+/// @tparam TField Field type.
+/// @param[in] base Object base address.
+/// @param[in] member Member pointer.
+/// @param[in] fallback Value returned when the read fails.
+/// @return Field value or fallback.
 template <class TObj, class TField>
 [[nodiscard]] TField TryReadOr(const void* base, TField TObj::* member, TField fallback) {
   TField value = fallback;
@@ -183,7 +296,13 @@ template <class TObj, class TField>
   return value;
 }
 
-// 校验可读后写入成员字段；失败返回 false 且不改动内存。
+/// @brief Write a member field after validating readability.
+/// @tparam TObj Object type.
+/// @tparam TField Field type.
+/// @param[in] base Object base address.
+/// @param[in] member Member pointer.
+/// @param[in] value Value to write.
+/// @return true on success; false on failure without modifying memory.
 template <class TObj, class TField>
 bool TryWrite(void* base, TField TObj::* member, const TField& value) {
   if (base == nullptr) {
@@ -197,66 +316,121 @@ bool TryWrite(void* base, TField TObj::* member, const TField& value) {
   return true;
 }
 
-// crash_capture.cpp：安装崩溃现场抓取（VEH）；幂等。
+// crash_capture.cpp
+/// @brief Install crash-context capture (VEH); idempotent.
 void installCrashCapture();
-// 反安装崩溃抓取：移除 VEH，避免 DLL 卸载后 VEH 指向已卸载代码。
+/// @brief Uninstall crash capture: remove the VEH so it cannot point at unloaded code after the
+///        DLL is unloaded.
 void uninstallCrashCapture();
 
-// crash_capture.cpp：本线程是否正在执行一次受 SEH 保护的引擎/插件调用。VEH 看到该
-// 标志时直接放行（EXCEPTION_CONTINUE_SEARCH），让受保护调用的 __except 接管，避免把
-// 可恢复的探测性异常当成致命崩溃写进 YKKZ000_crash.log。
+/// @brief Whether this thread is currently executing an SEH-guarded engine/plugin call.
+/// @note The VEH passes straight through (EXCEPTION_CONTINUE_SEARCH) when it sees this flag,
+///       letting the protected call's __except take over and avoiding writing recoverable,
+///       probing exceptions into YKKZ000_crash.log as fatal crashes.
 extern thread_local bool g_guardedCallActive;
 
 // effect_handler.cpp
+/// @brief Install the effect-handler hooks.
+/// @return true on success.
 [[nodiscard]] bool installEffectHandlerHook();
+/// @brief Uninstall the effect-handler hooks.
 void uninstallEffectHandlerHook();
-// 移除本模组登记过的 handler 节点（在转发真实 DllDestroyGameContext 之前调用，
-// 此时 root 仍有效）。请勿在其它时机调用。
+/// @brief Remove the handler nodes this mod registered.
+/// @note Call before forwarding to the real DllDestroyGameContext (when root is still valid).
+///       Do not call at any other time.
 void removeCustomEffectHandlers();
-// 卸载兜底：清空该插件在 handler 克隆表里登记的 analyze/handlerApply 回调，
-// 避免插件卸载后仍有 handler 调用跳进已卸载内存。
+/// @brief Unload fallback: clear the analyze/handlerApply callbacks this plugin registered in the
+///        handler clone tables.
+/// @param[in] pluginHandle Owning plugin handle.
+/// @note Prevents a handler from jumping into unloaded memory after the plugin is unloaded.
 void clearHandlerCallbacksForPlugin(void* pluginHandle);
 
 // vtable_clone.cpp
+/// @brief Clone the template factory vtable.
+/// @param[in] templateFactory Template factory object.
+/// @return The cloned vtable pointer.
 [[nodiscard]] void* cloneFactoryVTable(void* templateFactory);
+/// @brief Remember the type name for a type hash.
+/// @param[in] typeHash Type hash.
+/// @param[in] typeName Type name (an internal copy is kept).
 void rememberTypeName(std::uint32_t typeHash, const char* typeName);
-// 注册失败回滚：移除某 hash 的类型名记录（GetTypeName 槽随后返回空串）。
+/// @brief Registration-failure rollback: remove the type-name record for a hash.
+/// @param[in] typeHash Type hash.
+/// @note The GetTypeName slot then returns an empty string.
 void forgetTypeName(std::uint32_t typeHash);
 
 // effect_mechanism.cpp
-// 已登记的插件实现（impl 为拷贝，含归属句柄；originalCreate 为模板工厂 Create）。
+/// @brief A registered plugin implementation.
+/// @note impl is a copy and carries the owning handle; originalCreate is the template factory
+///       Create.
 struct EffectRecord {
   bridge::EffectImpl impl{};
   void* originalCreate = nullptr;
   void* pluginHandle = nullptr;
 };
-// 按自定义 EffectType 哈希取实现记录（不存在返回 false）。
+/// @brief Get the implementation record for a custom EffectType hash.
+/// @param[in] typeHash Type hash.
+/// @param[out] out Receives the record on a hit.
+/// @return true if present, otherwise false.
 [[nodiscard]] bool findEffectRecord(std::uint32_t typeHash, EffectRecord& out);
-// 登记/刷新某 EffectType 的实现与模板 Create（同一哈希重复调用为刷新）。
+/// @brief Register/refresh the implementation and template Create for an EffectType (repeated
+///        calls with the same hash refresh it).
+/// @param[in] typeHash Type hash.
+/// @param[in] impl Plugin implementation.
+/// @param[in] originalCreate Template factory Create.
+/// @return 0 on success, non-zero on failure.
 int registerEffectImpl(std::uint32_t typeHash, const bridge::EffectImpl* impl,
                        void* originalCreate);
-// 注册失败回滚：移除某 EffectType 的实现记录（不存在返回非 0）。
+/// @brief Registration-failure rollback: remove the implementation record for an EffectType.
+/// @param[in] typeHash Type hash.
+/// @return 0 on success, non-zero (not found).
 int unregisterEffectImpl(std::uint32_t typeHash);
-// 克隆效果对象 vtable 并按记录里的 template/impl 函数指针替换 Apply/Remove 槽。
+/// @brief Clone the effect object's vtable and replace its Apply/Remove slots with the
+///        template/impl function pointers from the record.
+/// @param[in] effectObject Effect object.
+/// @param[in] typeHash Type hash.
+/// @return The patched effect object.
 [[nodiscard]] void* patchEffectObjectSlots(void* effectObject, std::uint32_t typeHash);
+/// @brief Custom factory Create entry.
+/// @return The Create function pointer.
 [[nodiscard]] void* customFactoryCreateEntry();
-// 卸载兜底：把该插件替换过的效果对象槽还原为模板函数，并清空其实现回调指针。
+/// @brief Unload fallback: restore the effect-object slots this plugin replaced to the template
+///        functions and clear its implementation callback pointers.
+/// @param[in] pluginHandle Owning plugin handle.
 void teardownPluginEffects(void* pluginHandle);
 
 // plugin_manager.cpp
+/// @brief Load all plugins.
+/// @param[in] host Host service table.
 void loadPlugins(bridge::Host* host);
+/// @brief Unload all plugins.
 void unloadPlugins();
-// 当前正在加载的插件句柄（仅在 GetPlugin 调用期间设置，供注册归属使用）。
+/// @brief Set the handle of the plugin currently being loaded.
+/// @param[in] pluginHandle Owning plugin handle.
+/// @note Only set during a GetPlugin call, so registration can attribute ownership.
 void setActivePluginHandle(void* pluginHandle);
+/// @brief Get the handle of the plugin currently being loaded.
+/// @return The owning plugin handle.
 [[nodiscard]] void* activePluginHandle();
-// 向所有已加载插件广播上下文生命周期事件。
+/// @brief Broadcast a context lifecycle event to all loaded plugins.
+/// @param[in] event Event type.
+/// @param[in] context Context pointer.
 void notifyPluginsGameContext(bridge::GameContextEvent event, void* context);
 
 // proxy.cpp
+/// @brief Initialize the Loader idempotently.
 void initializeLoaderOnce();
+/// @brief Whether Loader initialization has completed.
+/// @return true if initialized.
 [[nodiscard]] bool loaderInitialized();
+/// @brief Create the game context.
+/// @return Context pointer.
 [[nodiscard]] void* createGameContext();
+/// @brief Destroy the game context.
+/// @param[in] context Context pointer.
 void destroyGameContext(void* context);
+/// @brief Get this session's telemetry hash.
+/// @return Session hash.
 [[nodiscard]] std::uint64_t telemetrySessionHash();
 
 } // namespace ykkz000::loader

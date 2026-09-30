@@ -12,15 +12,18 @@
 
 #include "loader_internal.h"
 
-// 效果处理器（handler）注册。
+// Effect handler registration.
 //
-// 引擎对“效果运行时行为”维护两套注册：工厂表（Registry<IModifierEffectFactory>，
-// 已由 registry.cpp 补齐）与处理器表（FUN_1804891b0 建立）。自定义 EffectType 只在
-// 工厂表登记、未在处理器表登记时，引擎解析其行为 handler 会取到无效节点并解引用
-// 0xFFFFFFFF。本文件在处理器表建立完成后，把已注册效果的类型哈希补登进去。
+// The engine keeps two registries for "effect runtime behavior": the factory table
+// (Registry<IModifierEffectFactory>, already extended by registry.cpp) and the handler table
+// (built by FUN_1804891b0). When a custom EffectType is registered only in the factory table and
+// not in the handler table, the engine resolves its behavior handler to an invalid node and
+// dereferences 0xFFFFFFFF. This file re-registers already-registered effect type hashes into the
+// handler table after it has been built.
 //
-// 每个自定义效果克隆其模板 handler 的描述表，槽 0/1 指向本文件的安全包装；包装在
-// 输入有效且插件提供了 analyze/handlerApply 时转发给插件（SEH 包裹），否则转发模板。
+// Each custom effect clones its template handler's descriptor table, with slots 0/1 pointing at
+// this file's safe wrappers; when the input is valid and the plugin provided analyze/handlerApply,
+// the wrapper forwards to the plugin (wrapped in SEH), otherwise it forwards to the template.
 namespace ykkz000::loader {
 namespace {
 
@@ -44,19 +47,23 @@ TemplateApplyFn       g_originalTemplateApply = nullptr;
 HandlerDispatchFn     g_originalHandlerDispatch = nullptr;
 #endif
 void*                 g_handlerRoot = nullptr;
-// 最近一次补登所使用的 root。引擎运行时的处理器表与初始化表（g_handlerRoot）是
-// 不同对象，必须跟随最新 root 补登，否则查询命中不到我们的效果。
+// The root used by the most recent re-registration. The engine's runtime handler table and the
+// init-time table (g_handlerRoot) are different objects, so we must re-register against the latest
+// root, otherwise lookups will not find our effects.
 void*                 g_registeredRoot = nullptr;
 
-// 多模板支持：每个自定义效果复用自己的模板效果（如城市产出修正 / 玩家战斗力修正）。
-// 运行期从引擎注册表按模板哈希分别捕获节点，再为每个效果克隆各自的描述表与
-// handler 对象，避免把 A 模板的 apply 用到 B 效果上。
+// Multi-template support: each custom effect reuses its own template effect (such as the city
+// yield modifier / player combat-strength modifier). At runtime the nodes are captured from the
+// engine registry per template hash, then each effect clones its own descriptor table and handler
+// object, avoiding applying template A's apply to effect B.
 //
-// 说明：模板 handler 一律运行期捕获，不用 profile 里的数据类 RVA（多次运行对不上）。
-std::unordered_map<std::uint32_t, void*> g_templateNodes;         // templateHash -> 节点
-std::unordered_map<std::uint32_t, void*> g_customHandlerObjects;  // effectHash -> 自建对象
-// 自建 handler 对象 -> 其克隆表中模板 analyze/apply 的原实现（包装转发用），以及
-// 插件提供的替换回调与其归属句柄。键必须是 handler 对象本身；handler[0] 才是描述表。
+// Note: template handlers are always captured at runtime; the profile's data-class RVAs are not
+// used (they do not match across runs).
+std::unordered_map<std::uint32_t, void*> g_templateNodes;         // templateHash -> node
+std::unordered_map<std::uint32_t, void*> g_customHandlerObjects;  // effectHash -> self-built object
+// Self-built handler object -> the original implementations of the template analyze/apply in its
+// clone table (for wrapper forwarding), plus the plugin-provided replacement callbacks and their
+// owning handle. The key must be the handler object itself; handler[0] is the descriptor table.
 struct HandlerOriginals {
   void* analyze = nullptr;
   void* apply = nullptr;
@@ -66,37 +73,37 @@ struct HandlerOriginals {
 };
 std::unordered_map<void*, HandlerOriginals> g_handlerOriginals;
 
-// >0 表示正处于我们自己的补登调用中，用于防止 setEffectHandler hook 递归补登。
+// >0 means we are inside our own re-registration call, used to prevent the setEffectHandler hook
+// from re-registering recursively.
 int                   g_registerDepth = 0;
 bool                  g_handlerHookInstalled = false;
 std::mutex            g_handlerMutex;
 std::mutex            g_hookMutex;
 
-// 构建档案中唯一带有可用 handler 数据地址的模板效果（hash 为
-// "EFFECT_ADJUST_CITY_YIELD_MODIFIER"）。仅用于“模板节点尚未被捕获时回退到档案
-// 数据地址”这一条机制退路；Loader 不因此认识任何行为。
-constexpr std::uint32_t kProfiledTemplateHash = 0x1672899D;
-
-// 诊断插桩的限流参数：前若干次全量打印，其后按步长抽样，避免人口频繁变动时刷屏。
+// Diagnostic instrumentation throttling parameters: print everything for the first several calls,
+// then sample by stride, to avoid log spam when population changes frequently.
 constexpr long kTraceFullCalls = 32;
 constexpr long kTraceStride = 256;
 
-// 派发 hook 的限流参数：前 N 次全量打印，之后抽样。无效 handler 一律打印。
+// Dispatch-hook throttling parameters: print everything for the first N calls, then sample.
+// Invalid handlers are always printed.
 #if defined(YKKZ000_ENABLE_DISPATCH_TRACE)
 constexpr long kDispatchFullCalls = 64;
 constexpr long kDispatchStride = 256;
 #endif
 
-// 只解引用明显有效的指针，避免插桩自身在 0xFFFFFFFF 之类地址上触发二次崩溃。
+// Dereference only clearly valid pointers, so the instrumentation itself cannot trigger a second
+// crash on an address like 0xFFFFFFFF.
 bool isPlausiblePointer(const void* pointer) {
   return reinterpret_cast<std::uintptr_t>(pointer) > 0x10000;
 }
 
-// FUN_1806083f0(root, 2, hash, handler) 的首批访存：root+0x08/+0x18/+0x30，
-// 以及桶数组 *(root+0x18)，长度 (mask+1)*0x10，mask = *(root+0x30)。
-// 任一不成立即视为陈旧 root，绝不交给引擎（退出整个游戏时 root 已释放）。
+// FUN_1806083f0(root, 2, hash, handler)'s first batch of memory accesses: root+0x08/+0x18/+0x30,
+// plus the bucket array *(root+0x18), length (mask+1)*0x10, mask = *(root+0x30).
+// If any of these does not hold, the root is treated as stale and never handed to the engine
+// (root has been freed when exiting the whole game).
 bool isPlausibleRegistryRoot(const void* root) {
-  // root 的 +0x00 即效果表（kind=2）的哈希表头（见 civ6::HandlerRegistryRoot）。
+  // root's +0x00 is the effect table (kind=2) hash-table header (see civ6::HandlerRegistryRoot).
   constexpr std::size_t kMaskEnd =
       offsetof(civ6::HandlerHashTable, mask) + sizeof(std::uint64_t);
   if (!isReadableRegion(root, kMaskEnd)) {
@@ -107,14 +114,15 @@ bool isPlausibleRegistryRoot(const void* root) {
   (void)tryReadField(root, tableOffset + offsetof(civ6::HandlerHashTable, mask), mask);
   void* buckets = nullptr;
   (void)tryReadField(root, tableOffset + offsetof(civ6::HandlerHashTable, buckets), buckets);
-  constexpr std::uint64_t kMaxBucketCount = 0x10000; // 防御：mask 异常即判无效
+  constexpr std::uint64_t kMaxBucketCount = 0x10000; // guard: an anomalous mask is treated as invalid
   if (mask >= kMaxBucketCount || buckets == nullptr) {
     return false;
   }
   return isReadableRegion(buckets, static_cast<std::size_t>((mask + 1) * civ6::kHandlerBucketBytes));
 }
 
-// 只在校验可读后取值；失败返回 fallback。插桩与节点解析共用，避免在不可读地址上崩溃。
+// Read a value only after validating readability; on failure return fallback. Shared by the
+// instrumentation and node parsing, so neither crashes on an unreadable address.
 int readInt32(const void* base, std::size_t offset, int fallback = 0) {
   int value = fallback;
   (void)tryReadField(base, offset, value);
@@ -127,9 +135,10 @@ void* readPointer(const void* base, std::size_t offset) {
   return value;
 }
 
-// —— SEH 包裹的插件回调 ——
-// MSVC 禁止在含需要栈展开的 C++ 对象的函数里使用 __try，故这里保持 POD-only 的
-// 薄包装；VEH 见到 g_guardedCallActive 时直接放行，交给 __except 接管（不写崩溃日志）。
+// -- SEH-wrapped plugin callbacks --
+// MSVC forbids __try in a function that contains C++ objects requiring stack unwinding, so this
+// stays a thin POD-only wrapper; when the VEH sees g_guardedCallActive it passes through and lets
+// __except take over (no crash log written).
 void* callGuardedAnalyze(bridge::AnalyzeFn fn, void* self, void* args) {
   g_guardedCallActive = true;
   void* result = nullptr;
@@ -154,13 +163,14 @@ std::uint64_t callGuardedApply(bridge::ApplyFn fn, void* self, void* a1, void* a
   return result;
 }
 
-// —— 查询/应用路径插桩：仅打印（限流），不改行为 ——
+// -- Query/apply path instrumentation: print only (throttled), do not change behavior --
 std::atomic<long> s_setCalls{0};
 std::atomic<long> s_analyzeCalls{0};
 std::atomic<long> s_applyCalls{0};
 
-// 把本次进程内已注册的效果补登进指定 root 的处理器表（kind=2）。幂等，可重复调用。
-// 定义在本文件后部；SetEffectHandler_Hook 需要先声明。
+// Re-register the effects registered in this process into the handler table (kind=2) of the given
+// root. Idempotent and safe to call repeatedly. Defined later in this file; SetEffectHandler_Hook
+// needs a forward declaration.
 int registerCustomEffectHandlersForRoot(void* root);
 
 void SetEffectHandler_Hook(void* root, int kind, std::uint32_t hash, void* handlerObject) {
@@ -169,13 +179,16 @@ void SetEffectHandler_Hook(void* root, int kind, std::uint32_t hash, void* handl
     logMessageF(1, "set: call#%ld root=%p kind=%d hash=0x%08X handler=%p", call, root, kind,
                 hash, handlerObject);
   }
-  // 先让引擎自己的登记生效，再镜像补登，避免在其内部遍历期间修改同一容器。
+  // Let the engine's own registration take effect first, then mirror the re-registration, to avoid
+  // modifying the same container during its internal iteration.
   if (g_originalSetEffectHandler != nullptr) {
     g_originalSetEffectHandler(root, kind, hash, handlerObject);
   }
 
-  // 引擎运行时的处理器表与初始化表是不同的 root。每当在尚未补登过的 root 上登记
-  // （即运行时表首次出现），立即用同一 root 补登我们的效果；幂等且防递归。
+  // The engine's runtime handler table and the init-time table are different roots. Whenever a
+  // registration happens on a root not yet re-registered (i.e. the runtime table's first
+  // appearance), immediately re-register our effects against the same root; it is idempotent and
+  // recursion-safe.
   if (root != nullptr && g_registerDepth == 0) {
     bool needRegister = false;
     {
@@ -195,15 +208,17 @@ void SetEffectHandler_Hook(void* root, int kind, std::uint32_t hash, void* handl
   }
 }
 
-// hook FUN_180489040(container, outNode, hashPtr)：handler 表插入/查找。无论插入还是
-// 查找，函数都会把节点写进 outNode[0]；因此在任一“已注册模板哈希”命中时捕获其节点，
-// 之后读 node+0x18 即可拿到引擎真正使用的 handler 对象（登记时调用该函数取值）。
+// hook FUN_180489040(container, outNode, hashPtr): handler table insert/lookup. Whether inserting
+// or looking up, the function writes the node into outNode[0]; so on a hit for any
+// "already-registered template hash", capture its node, and afterwards read node+0x18 to obtain
+// the handler object the engine actually uses (the function is called with that value at
+// registration time).
 void* HandlerNodeInsert_Hook(void* container, void* outNode, const std::uint32_t* hash) {
   void* result = g_originalHandlerNodeInsert != nullptr
                      ? g_originalHandlerNodeInsert(container, outNode, hash)
                      : outNode;
   if (hash != nullptr && outNode != nullptr && isRegisteredTemplateHash(*hash)) {
-    void* node = readPointer(outNode, 0); // outNode[0] = 节点指针
+    void* node = readPointer(outNode, 0); // outNode[0] = node pointer
     if (node != nullptr) {
       {
         std::lock_guard<std::mutex> guard(g_handlerMutex);
@@ -216,17 +231,8 @@ void* HandlerNodeInsert_Hook(void* container, void* outNode, const std::uint32_t
   return result;
 }
 
-// 按模板哈希回退到 profile 记录的数据地址。仅城市产出模板保留该退路（历史兼容）；
-// 其它模板无退路。
-void* profiledTemplateHandler(std::uint32_t templateHash) {
-  if (templateHash == kProfiledTemplateHash) {
-    logMessage(0, "handler: profiled template node not captured; falling back to profiled value");
-    return gameCore().templateEffectHandler; // 回退（可能不正确）
-  }
-  return nullptr;
-}
-
-// 取“引擎真正使用的”模板 handler 对象（登记时调用；此时引擎已写入 node+0x18）。
+// Get the "engine-actually-used" template handler object (called at registration time, when the
+// engine has written node+0x18).
 void* templateEffectHandlerObject(std::uint32_t templateHash) {
   void* node = nullptr;
   {
@@ -242,19 +248,18 @@ void* templateEffectHandlerObject(std::uint32_t templateHash) {
       return handler;
     }
   }
-  void* fallback = profiledTemplateHandler(templateHash);
-  if (fallback != nullptr) {
-    return fallback;
-  }
   logMessageF(0, "handler: template node 0x%08X not captured; handler unavailable", templateHash);
   return nullptr;
 }
 
-// 关停期 context/args 可能为 0 或已失效：先校验，失效直接 no-op，绝不进入模板实现
-// （模板 apply 会解引用 [x+0x81] 之类的字段，输入为 0 时即崩）。这是退出崩溃的决定性
-// 修复：不能依赖 destroyGameContext 移除节点——关停路径可能绕过它直接调用 handler。
-// 通过 self（handler 对象）查其模板原始槽并转发；self 是 handler 对象，handler[0]
-// 才是描述表，绝不能拿描述表当键。插件回调存在时优先转发插件（SEH 包裹）。
+// During shutdown, context/args may be 0 or already invalid: validate first; if invalid, no-op
+// immediately and never enter the template implementation (the template apply dereferences fields
+// like [x+0x81], so a 0 input crashes it). This is the decisive fix for the exit crash: we cannot
+// rely on destroyGameContext removing the node -- the shutdown path may bypass it and call the
+// handler directly.
+// Look up the template's original slot via self (the handler object) and forward; self is the
+// handler object, handler[0] is the descriptor table, and the descriptor table must never be used
+// as the key. When a plugin callback exists, forward to the plugin first (wrapped in SEH).
 extern "C" void* ykkz000_handlerAnalyze(void* self, void* args) {
   if (!isPlausiblePointer(args)) {
     return nullptr;
@@ -277,7 +282,7 @@ extern "C" void* ykkz000_handlerAnalyze(void* self, void* args) {
 
 extern "C" std::uint64_t ykkz000_handlerApply(void* self, void* context, void* args) {
   if (!isPlausiblePointer(args) || !isPlausiblePointer(context)) {
-    return 0; // 关停期安全分支：不再触碰模板/插件实现
+    return 0; // shutdown-safe branch: do not touch the template/plugin implementation anymore
   }
   HandlerOriginals originals;
   {
@@ -295,16 +300,19 @@ extern "C" std::uint64_t ykkz000_handlerApply(void* self, void* context, void* a
              : 0;
 }
 
-// 自建 handler 对象不持有引擎资源，释放即 no-op。绝不能转发到模板释放例程
-// （FUN_18046b610）：它会解引用 handler 对象字段，而我们的对象不是模板对象。
+// The self-built handler object holds no engine resources, so releasing it is a no-op. It must
+// never forward to the template release routine (FUN_18046b610): that dereferences handler-object
+// fields, and our object is not a template object.
 extern "C" std::uint64_t ykkz000_handlerRelease(void* /*self*/, int /*flags*/) {
   return 0;
 }
 
-// 构建/复用指定效果的 handler 对象：克隆模板描述表，替换槽 0/1 为上面的安全包装、
-// 槽 4 为 no-op 释放，其余槽原样复制（保持其它行为不变）。对象清零并足量分配，避免
-// 关停期引擎读对象字段时取到堆垃圾。失败返回 nullptr（调用方跳过登记，绝不登记空
-// handler 让引擎解引用无效节点）。
+// Build/reuse the handler object for the given effect: clone the template descriptor table, replace
+// slots 0/1 with the safe wrappers above and slot 4 with the no-op release, and copy the remaining
+// slots verbatim (keeping other behavior unchanged). The object is zeroed and allocated large
+// enough, so the engine reading object fields during shutdown does not get heap garbage. On failure
+// return nullptr (the caller skips registration; never register an empty handler that would make
+// the engine dereference an invalid node).
 void* customEffectHandlerObject(std::uint32_t effectHash, std::uint32_t templateHash,
                                const bridge::EffectImpl& impl, void* pluginHandle) {
   {
@@ -319,7 +327,7 @@ void* customEffectHandlerObject(std::uint32_t effectHash, std::uint32_t template
     logMessageF(0, "handler: template 0x%08X handler unavailable; clone aborted", templateHash);
     return nullptr;
   }
-  void* table = readPointer(handler, offsetof(civ6::HandlerObject, table)); // handler[0] = 描述表
+  void* table = readPointer(handler, offsetof(civ6::HandlerObject, table)); // handler[0] = descriptor table
   if (!isPlausiblePointer(table)) {
     logMessageF(0, "handler: template 0x%08X handler table invalid; clone aborted", templateHash);
     return nullptr;
@@ -341,7 +349,8 @@ void* customEffectHandlerObject(std::uint32_t effectHash, std::uint32_t template
   clone[civ6::kHandlerApplySlot] = reinterpret_cast<void*>(&ykkz000_handlerApply);
   clone[civ6::kHandlerReleaseSlot] = reinterpret_cast<void*>(&ykkz000_handlerRelease);
 
-  // 清零 + 足量：handler 对象不是裸 8 字节，避免其它槽读到堆垃圾。
+  // Zero + large enough: the handler object is not a bare 8 bytes, so other slots do not read heap
+  // garbage.
   auto* handlerObject = static_cast<std::uint8_t*>(
       HeapAlloc(GetProcessHeap(), HEAP_ZERO_MEMORY, sizeof(civ6::HandlerObject)));
   if (handlerObject == nullptr) {
@@ -399,10 +408,11 @@ std::uint64_t TemplateApply_Hook(void* self, void* context, void* args) {
   return g_originalTemplateApply != nullptr ? g_originalTemplateApply(self, context, args) : 0;
 }
 
-// handler 派发 thunk（RVA 0x979290）：
+// handler dispatch thunk (RVA 0x979290):
 //   handler = *(node+0x18); if (handler) { table = *(handler); return table[6](handler); } return 1;
-// 注意：这不是效果处理器派发，而是通用 node→对象→虚调用槽 +0x30 助手；仅作诊断用，
-// 默认不安装（需要取证时用 -DYKKZ000_ENABLE_DISPATCH_TRACE=ON 重新构建）。
+// Note: this is not effect-handler dispatch, but a generic node->object->virtual-call-slot +0x30
+// helper; it is diagnostic only and is not installed by default (rebuild with
+// -DYKKZ000_ENABLE_DISPATCH_TRACE=ON when evidence is needed).
 #if defined(YKKZ000_ENABLE_DISPATCH_TRACE)
 void* HandlerDispatch_Hook(void* node) {
   static std::atomic<long> s_dispatchCalls{0};
@@ -419,7 +429,7 @@ void* HandlerDispatch_Hook(void* node) {
   const std::uint32_t hash =
       nodeOk ? static_cast<std::uint32_t>(readInt32(node, offsetof(civ6::HandlerNode, hash))) : 0;
 
-  // handler 非空却不可用 ⇒ 正是产生 0xFFFFFFFF 读的那类情况。
+  // handler non-null but unusable => exactly the situation that produces the 0xFFFFFFFF read.
   const bool invalid =
       (handler != nullptr) &&
       (!isPlausiblePointer(handler) || !isPlausiblePointer(table) || !isPlausiblePointer(slotSix));
@@ -440,7 +450,7 @@ void* HandlerDispatch_Hook(void* node) {
 
 #if !defined(YKKZ000_DISABLE_HANDLER_GUARD)
   if (invalid) {
-    return reinterpret_cast<void*>(1); // 引擎自带的“无 handler”语义
+    return reinterpret_cast<void*>(1); // the engine's own "no handler" semantics
   }
 #endif
   return g_originalHandlerDispatch != nullptr ? g_originalHandlerDispatch(node)
@@ -448,7 +458,8 @@ void* HandlerDispatch_Hook(void* node) {
 }
 #endif
 
-// 把本次进程内已注册的效果补登进指定 root 的处理器表（kind=2）。返回补登条数。
+// Re-register the effects registered in this process into the handler table (kind=2) of the given
+// root. Returns the number of entries re-registered.
 int registerCustomEffectHandlersForRoot(void* root) {
   const GameCoreApi& api = gameCore();
   if (root == nullptr || api.setEffectHandler == nullptr) {
@@ -463,9 +474,10 @@ int registerCustomEffectHandlersForRoot(void* root) {
       continue;
     }
     EffectRecord record;
-    (void)findEffectRecord(effect.hash, record); // 未登记实现则视为纯模板复用
-    // 登记该效果自建 handler（克隆模板描述表 + 安全包装 analyze/apply）：关停期
-    // 引擎直接调用它时，输入失效会被包装短路，不再进入模板实现而崩溃。
+    (void)findEffectRecord(effect.hash, record); // no implementation record means pure template reuse
+    // Register the effect's self-built handler (cloned template descriptor table + safe wrappers
+    // for analyze/apply): when the engine calls it directly during shutdown, invalid inputs are
+    // short-circuited by the wrapper and no longer enter the template implementation and crash.
     void* handlerObject =
         customEffectHandlerObject(effect.hash, effect.templateHash, record.impl,
                                   record.pluginHandle);
@@ -487,10 +499,11 @@ int registerCustomEffectHandlersForRoot(void* root) {
   return count;
 }
 
-// 移除我们在运行时表 root 上登记过的 handler 节点（handlerObject=nullptr ⇒ 引擎移除该节点）。
-// 只在真实 DllDestroyGameContext 之前调用。退出整个游戏时引擎可能已先拆掉注册表，
-// 此时保存的 root 内存不可读：必须先用 isPlausibleRegistryRoot 校验，绝不能再交给
-// 引擎（否则 FUN_1806083f0 读 root+0x30 即崩，见 exit-crash 记录 #2）。
+// Remove the handler nodes we registered on the runtime table root (handlerObject=nullptr =>
+// the engine removes that node). Call only before the real DllDestroyGameContext. When exiting the
+// whole game the engine may have already torn down the registry, in which case the saved root
+// memory is unreadable: it must be validated first with isPlausibleRegistryRoot and never handed
+// to the engine (otherwise FUN_1806083f0 reads root+0x30 and crashes; see exit-crash record #2).
 void removeCustomEffectHandlersImpl() {
   const GameCoreApi& api = gameCore();
   if (api.setEffectHandler == nullptr) {
@@ -499,15 +512,16 @@ void removeCustomEffectHandlersImpl() {
   void* root = nullptr;
   {
     std::lock_guard<std::mutex> guard(g_handlerMutex);
-    root = g_registeredRoot; // 初始化根只在建表期有效；不可读时由下方的校验拦下
+    root = g_registeredRoot; // the init root is only valid during table construction; caught below if unreadable
   }
   if (root == nullptr) {
     logMessage(1, "handler: no registry root recorded; skip removal");
     return;
   }
   if (!isPlausibleRegistryRoot(root)) {
-    // 退出整个游戏时引擎可能已先拆掉注册表：此时内存不可读，直接跳过。
-    // 槽 4 已是 no-op，跳过移除不会导致关停期崩溃。
+    // When exiting the whole game the engine may have already torn down the registry, leaving the
+    // memory unreadable; skip in that case. Slot 4 is already a no-op, so skipping the removal
+    // does not cause a shutdown crash.
     logMessageF(1, "handler: skip stale root %p; removal aborted", root);
     return;
   }
@@ -524,10 +538,12 @@ void removeCustomEffectHandlersImpl() {
   logMessageF(1, "handler: custom handlers removed root=%p count=%d", root, removed);
 }
 
-// hook FUN_1804891b0：RCX 即处理器表根。必须先让原函数建好全部内建节点，再把我们的
-// 效果补登进去；每个游戏上下文都会重建根对象，因此每次都要重新登记。
+// hook FUN_1804891b0: RCX is the handler table root. The original function must first build all
+// built-in nodes, then we re-register our effects into it; each game context rebuilds the root
+// object, so registration must be repeated every time.
 //
-// 注：反编译确认原函数以 RAX 回传其入参 root，故这里保持 void* 返回并回传跳板结果。
+// Note: decompilation confirms the original function returns its root argument in RAX, so keep a
+// void* return here and return the trampoline result.
 void* HandlerRegistryInit_Hook(void* root) {
   if (g_originalHandlerRegistryInit == nullptr) {
     return root;
@@ -536,7 +552,7 @@ void* HandlerRegistryInit_Hook(void* root) {
   {
     std::lock_guard<std::mutex> guard(g_handlerMutex);
     g_handlerRoot = root;
-    g_registeredRoot = root; // 初始化表已补登
+    g_registeredRoot = root; // the init table has been re-registered
   }
   void* result = g_originalHandlerRegistryInit(root);
   registerCustomEffectHandlersForRoot(root);
@@ -576,9 +592,9 @@ bool installEffectHandlerHook() {
   }
   LogScope scope("install effect handler hook");
   const GameCoreApi& api = gameCore();
-  logMessageF(1, "handler: registryInit=%p setHandler=%p template=%p table=%p analyze=%p apply=%p",
-              api.handlerRegistryInit, api.setEffectHandler, api.templateEffectHandler,
-              api.templateHandlerTable, api.templateAnalyze, api.templateApply);
+  logMessageF(1, "handler: registryInit=%p setHandler=%p handlerData=%p table=%p analyze=%p apply=%p",
+              api.handlerRegistryInit, api.setEffectHandler, api.profiledHandlerData,
+              api.profiledHandlerTable, api.profiledHandlerAnalyze, api.profiledHandlerApply);
   if (api.handlerRegistryInit == nullptr || api.setEffectHandler == nullptr) {
     logMessage(0, "Effect handler hook: entry points unavailable; custom effects may crash "
                   "when the engine resolves their handler");
@@ -605,16 +621,17 @@ bool installEffectHandlerHook() {
   addHook(api.handlerRegistryInit, reinterpret_cast<LPVOID>(&HandlerRegistryInit_Hook),
           reinterpret_cast<LPVOID*>(&g_originalHandlerRegistryInit), "handlerRegistryInit");
 
-  // 诊断插桩（只打印，不改行为）：确认引擎是否把自定义效果走到 handler 应用路径。
-  // 失败不视为致命——补登本身不依赖这三处 hook。
+  // Diagnostic instrumentation (print only, do not change behavior): confirm whether the engine
+  // routes custom effects through the handler apply path. Failure is not treated as fatal -- the
+  // re-registration itself does not depend on these three hooks.
   addHook(api.setEffectHandler, reinterpret_cast<LPVOID>(&SetEffectHandler_Hook),
           reinterpret_cast<LPVOID*>(&g_originalSetEffectHandler), "setEffectHandler");
   addHook(api.handlerNodeInsert, reinterpret_cast<LPVOID>(&HandlerNodeInsert_Hook),
           reinterpret_cast<LPVOID*>(&g_originalHandlerNodeInsert), "handlerNodeInsert");
-  addHook(api.templateAnalyze, reinterpret_cast<LPVOID>(&TemplateAnalyze_Hook),
-          reinterpret_cast<LPVOID*>(&g_originalTemplateAnalyze), "templateAnalyze");
-  addHook(api.templateApply, reinterpret_cast<LPVOID>(&TemplateApply_Hook),
-          reinterpret_cast<LPVOID*>(&g_originalTemplateApply), "templateApply");
+  addHook(api.profiledHandlerAnalyze, reinterpret_cast<LPVOID>(&TemplateAnalyze_Hook),
+          reinterpret_cast<LPVOID*>(&g_originalTemplateAnalyze), "profiledHandlerAnalyze");
+  addHook(api.profiledHandlerApply, reinterpret_cast<LPVOID>(&TemplateApply_Hook),
+          reinterpret_cast<LPVOID*>(&g_originalTemplateApply), "profiledHandlerApply");
 #if defined(YKKZ000_ENABLE_DISPATCH_TRACE)
   addHook(api.effectHandlerDispatch, reinterpret_cast<LPVOID>(&HandlerDispatch_Hook),
           reinterpret_cast<LPVOID*>(&g_originalHandlerDispatch), "handlerDispatch");
@@ -626,9 +643,10 @@ bool installEffectHandlerHook() {
 #endif
 }
 
-// 反安装只停用 hook，不释放 MinHook 跳板（与其它 hook 同一策略：反安装时可能仍有
-// 线程执行在 detour 内，释放跳板会调用到已释放内存）。下一个游戏上下文由
-// installEffectHandlerHook() 重新启用。
+// Uninstall only disables the hooks; it does not free MinHook trampolines (same policy as the other
+// hooks: during uninstall a thread may still be executing inside the detour, and freeing the
+// trampoline would call into freed memory). The next game context re-enables them via
+// installEffectHandlerHook().
 void uninstallEffectHandlerHook() {
   std::lock_guard<std::mutex> guard(g_hookMutex);
   LogScope scope("uninstall effect handler hook");
@@ -643,11 +661,11 @@ void uninstallEffectHandlerHook() {
     if (api.handlerNodeInsert != nullptr) {
       (void)removeHookRaw(api.handlerNodeInsert);
     }
-    if (api.templateAnalyze != nullptr) {
-      (void)removeHookRaw(api.templateAnalyze);
+    if (api.profiledHandlerAnalyze != nullptr) {
+      (void)removeHookRaw(api.profiledHandlerAnalyze);
     }
-    if (api.templateApply != nullptr) {
-      (void)removeHookRaw(api.templateApply);
+    if (api.profiledHandlerApply != nullptr) {
+      (void)removeHookRaw(api.profiledHandlerApply);
     }
 #if defined(YKKZ000_ENABLE_DISPATCH_TRACE)
     if (api.effectHandlerDispatch != nullptr) {
@@ -661,9 +679,11 @@ void uninstallEffectHandlerHook() {
     g_handlerRoot = nullptr;
     g_registeredRoot = nullptr;
     g_registerDepth = 0;
-    // 旧克隆、旧 handler 对象与原始槽映射不释放（引擎注册表可能仍引用，须进程常驻）；
-    // 仅清缓存，使下一个上下文用新捕获的模板节点重建。清空原始槽映射后，若关停期仍有
-    // 线程调用旧 handler 的安全包装，会安全地 no-op 而非转发到已释放的模板实现。
+    // Old clones, old handler objects, and the original-slot map are not freed (the engine
+    // registry may still reference them, so they must live for the process lifetime); only the
+    // caches are cleared so the next context rebuilds from newly captured template nodes. After
+    // the original-slot map is cleared, if a thread still calls an old handler's safe wrapper
+    // during shutdown, it safely no-ops instead of forwarding to a freed template implementation.
     g_templateNodes.clear();
     g_customHandlerObjects.clear();
     g_handlerOriginals.clear();

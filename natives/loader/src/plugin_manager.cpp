@@ -13,9 +13,10 @@
 namespace ykkz000::loader {
 namespace {
 
-// 每个插件一个宿主视图（bridge::Host 副本）：pluginHandle 指向本结构，插件通过
-// host->pluginHandle 回传归属；插件在 GetPlugin 里把 host->onGameContext 设为自身的
-// 上下文回调，Loader 之后据此广播生命周期事件。
+// One host view per plugin (a copy of bridge::Host): pluginHandle points at this structure and the
+// plugin hands the ownership back through host->pluginHandle; the plugin sets host->onGameContext
+// to its own context callback in GetPlugin, and the Loader then broadcasts lifecycle events
+// through it.
 struct PluginSlot {
   HMODULE module = nullptr;
   bridge::DestroyPluginFn destroy = nullptr;
@@ -57,7 +58,8 @@ std::vector<std::wstring> pluginSearchDirs() {
   if (base.empty()) {
     return dirs;
   }
-  // 仅扫描专用的插件目录，绝不加载游戏 Binaries 目录中的任意 DLL。
+  // Scan only the dedicated plugin directories; never load arbitrary DLLs from the game Binaries
+  // directory.
   addUnique(dirs, base + L"\\ykkz000_civ6_plugin");
   addUnique(dirs, base + L"\\..\\..\\..\\..\\ykkz000_civ6_plugin");
   return dirs;
@@ -70,15 +72,15 @@ bool isSelfOrGameCore(HMODULE module) {
   return module == gameCore().module;
 }
 
-// POD-only 的 SEH 包裹：单个插件回调故障不拖垮游戏。VEH 见到 g_guardedCallActive
-// 时放行给 __except，不写崩溃日志。
+// POD-only SEH wrapper: a single plugin callback failure does not take down the game. When the VEH
+// sees g_guardedCallActive it passes through to __except and writes no crash log.
 void callListenerGuarded(bridge::ContextListenerFn listener, bridge::GameContextEvent event,
                          void* context) {
   g_guardedCallActive = true;
   __try {
     listener(event, context);
   } __except (EXCEPTION_EXECUTE_HANDLER) {
-    // 忽略：单插件回调异常不应中断其它插件或引擎流程。
+    // Ignored: a single plugin callback exception must not interrupt other plugins or the engine.
   }
   g_guardedCallActive = false;
 }
@@ -96,7 +98,7 @@ void tryLoadPlugin(const std::wstring& file, const bridge::Host& hostTemplate) {
     return;
   }
   if (isSelfOrGameCore(module)) {
-    FreeLibrary(module); // 自身或 GameCore，静默跳过
+    FreeLibrary(module); // self or GameCore; skip silently
     return;
   }
   logMessageF(1, "plugin: LoadLibrary -> %p", module);
@@ -122,16 +124,18 @@ void tryLoadPlugin(const std::wstring& file, const bridge::Host& hostTemplate) {
   slot->module = module;
   slot->destroy = destroy;
   slot->host = hostTemplate;
-  slot->host.pluginHandle = slot; // 每个插件独立的归属句柄
+  slot->host.pluginHandle = slot; // per-plugin ownership handle
 
   setActivePluginHandle(slot);
   const int result = getPlugin(&slot->host);
   setActivePluginHandle(nullptr);
   logMessageF(1, "plugin: GetPlugin(host) -> %d", result);
   if (result <= 0) {
-    // GetPlugin 失败：插件可能已登记 hook/槽/实现回调，必须先由 Loader 兜底还原
-    // （撤销仍在登记表里的 plugin 归属 hook 与效果槽、清空实现回调），再让插件自行
-    // 清理并卸载，否则指向插件代码的 hook/槽在 FreeLibrary 后即成悬垂指针。
+    // GetPlugin failed: the plugin may already have registered hooks/slots/implementation
+    // callbacks, so the Loader must first restore as a fallback (revoke the still-registered
+    // plugin-owned hooks and effect slots, clear implementation callbacks), and only then let the
+    // plugin clean up and unload; otherwise hooks/slots pointing at plugin code become dangling
+    // after FreeLibrary.
     removeHooksForPlugin(slot);
     teardownPluginEffects(slot);
     if (destroy != nullptr) {
@@ -147,7 +151,7 @@ void tryLoadPlugin(const std::wstring& file, const bridge::Host& hostTemplate) {
     return;
   }
 
-  slot->listener = slot->host.onGameContext; // 插件在 GetPlugin 中登记
+  slot->listener = slot->host.onGameContext; // the plugin registers this inside GetPlugin
   g_plugins.push_back(slot);
   logMessage(1, L"Plugin loaded: " + file);
 }
@@ -208,17 +212,18 @@ void notifyPluginsGameContext(bridge::GameContextEvent event, void* context) {
 
 void unloadPlugins() {
   LogScope scope("unload plugins");
-  // 逆序卸载：与加载顺序相反，确保依赖关系被正确拆解。
+  // Unload in reverse order: opposite to load order, ensuring dependencies are torn down correctly.
   for (auto it = g_plugins.rbegin(); it != g_plugins.rend(); ++it) {
     PluginSlot* slot = *it;
     if (slot == nullptr) {
       continue;
     }
-    // 先让插件清理自身（撤销 hook、清理缓存），再做 Loader 兜底。
+    // Let the plugin clean up first (revoke hooks, clear caches), then do the Loader fallback.
     if (slot->listener != nullptr) {
       callListenerGuarded(slot->listener, bridge::GameContextEvent::kDestroyed, nullptr);
     }
-    // 兜底：仍指向该插件代码的 hook 与 vtable 槽一律移除/还原，然后才允许卸载。
+    // Fallback: remove/restore any hooks and vtable slots still pointing at this plugin's code
+    // before unloading is allowed.
     removeHooksForPlugin(slot);
     teardownPluginEffects(slot);
     if (slot->destroy != nullptr) {

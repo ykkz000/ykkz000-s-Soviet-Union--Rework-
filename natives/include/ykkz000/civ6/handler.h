@@ -4,19 +4,24 @@
 #include <cstdint>
 #include <type_traits>
 
+/// @file handler.h
+/// @brief Layout mirror of the engine's effect-handler descriptor table, object, and registration
+///   hash table.
+/// @note Describes layout only; offsets pinned by static_assert.
 namespace ykkz000::civ6 {
 
-// 效果处理器（handler）的描述表：一个函数指针数组。
-// 槽 0 = analyze、槽 1 = apply（由模板实现与运行期日志确认）；槽 6（+0x30）由派发
-// thunk 0x979290 尾调用（rcx=[rcx+0x18]; jmp [rax+0x30]）。
+/// @brief Descriptor table of an effect handler: an array of function pointers.
+/// @note Slot 0 = analyze, slot 1 = apply (confirmed by the template implementation and runtime
+///       logs); slot 6 (+0x30) is tail-called by dispatch thunk 0x979290
+///       (rcx=[rcx+0x18]; jmp [rax+0x30]).
 struct HandlerTable {
-  void* (*analyze)(void* self, void* args);                     // 0x00: 槽 0
-  std::uint64_t (*apply)(void* self, void* context, void* args); // 0x08: 槽 1
-  void* unknown_0x10;                                           // 0x10: 槽 2（未验证）
-  void* unknown_0x18;                                           // 0x18: 槽 3（未验证）
-  std::uint64_t (*release)(void* self, int flags);              // 0x20: 槽 4
-  void* unknown_0x28;                                           // 0x28: 槽 5（未验证）
-  void* (*dispatch_slot)(void* handler);                        // 0x30: 槽 6
+  void* (*analyze)(void* self, void* args);                     ///< 0x00: Slot 0
+  std::uint64_t (*apply)(void* self, void* context, void* args); ///< 0x08: Slot 1
+  void* unknown_0x10;                                           ///< 0x10: Slot 2 (unverified)
+  void* unknown_0x18;                                           ///< 0x18: Slot 3 (unverified)
+  std::uint64_t (*release)(void* self, int flags);              ///< 0x20: Slot 4
+  void* unknown_0x28;                                           ///< 0x28: Slot 5 (unverified)
+  void* (*dispatch_slot)(void* handler);                        ///< 0x30: Slot 6
 };
 
 static_assert(std::is_standard_layout_v<HandlerTable>);
@@ -26,7 +31,8 @@ static_assert(offsetof(HandlerTable, release) == 0x20);
 static_assert(offsetof(HandlerTable, dispatch_slot) == 0x30);
 static_assert(sizeof(HandlerTable) == 0x38);
 
-// 描述表槽位（由字段偏移导出，保证与布局一致）。
+/// @brief Descriptor-table slots (derived from the field offsets to stay consistent with the
+///   layout).
 inline constexpr std::size_t kHandlerAnalyzeSlot = offsetof(HandlerTable, analyze) / sizeof(void*);
 inline constexpr std::size_t kHandlerApplySlot = offsetof(HandlerTable, apply) / sizeof(void*);
 inline constexpr std::size_t kHandlerReleaseSlot = offsetof(HandlerTable, release) / sizeof(void*);
@@ -35,24 +41,25 @@ static_assert(kHandlerAnalyzeSlot == 0);
 static_assert(kHandlerApplySlot == 1);
 static_assert(kHandlerReleaseSlot == 4);
 
-// handler 对象为单指针对象：handler[0] 指向描述表。自建对象必须清零并足量分配
-// （0x40 字节），否则其它槽会读到堆垃圾（退出崩溃根因）。
+/// @brief A handler object is a single-pointer object: handler[0] points to the descriptor table.
+/// @note A self-built object must be zeroed and allocated with enough space (0x40 bytes), or the
+///       remaining slots will read heap garbage (the root cause of the exit crash).
 struct HandlerObject {
-  HandlerTable* table;             // 0x00: 描述表
-  std::uint8_t unknown_0x08[0x38]; // 0x08..0x3F: 未知（模板对象字段）
+  HandlerTable* table;             ///< 0x00: Descriptor table
+  std::uint8_t unknown_0x08[0x38]; ///< 0x08..0x3F: Unknown (template object fields)
 };
 
 static_assert(std::is_standard_layout_v<HandlerObject>);
 static_assert(offsetof(HandlerObject, table) == 0x00);
 static_assert(sizeof(HandlerObject) == 0x40);
 
-// 引擎“处理器（handler）”哈希表节点（0x20 字节）。
+/// @brief Engine "handler" hash-table node (0x20 bytes).
 struct HandlerNode {
-  HandlerNode* next;            // 0x00: 链下一节点
-  HandlerNode* prev;            // 0x08: 链上一节点
-  std::uint32_t hash;           // 0x10: EffectType 哈希
-  std::uint8_t unknown_0x14[4]; // 0x14: 未知（对齐填充）
-  HandlerObject* handler;       // 0x18: handler 对象
+  HandlerNode* next;            ///< 0x00: Next node in the chain
+  HandlerNode* prev;            ///< 0x08: Previous node in the chain
+  std::uint32_t hash;           ///< 0x10: EffectType hash
+  std::uint8_t unknown_0x14[4]; ///< 0x14: Unknown (alignment padding)
+  HandlerObject* handler;       ///< 0x18: Handler object
 };
 
 static_assert(std::is_standard_layout_v<HandlerNode>);
@@ -60,13 +67,14 @@ static_assert(offsetof(HandlerNode, hash) == 0x10);
 static_assert(offsetof(HandlerNode, handler) == 0x18);
 static_assert(sizeof(HandlerNode) == 0x20);
 
-// 处理器哈希表的表头（FUN_180489040 现场）：桶数组 = buckets，长度 = (mask+1)*0x10。
-// 表头即为注册表根的每个 kind 条目（见 HandlerRegistryRoot）。
-struct HandlerHashTable {  std::uint8_t unknown_0x00[0x18]; // 0x00..0x17: 未知
-  void* buckets;                   // 0x18: 桶数组
-  std::uint8_t unknown_0x20[0x10]; // 0x20..0x2F: 未知
-  std::uint64_t mask;              // 0x30: 桶数掩码
-  std::uint8_t unknown_0x38[0x8];  // 0x38..0x3F: 未知（对齐填充）
+/// @brief Header of the handler hash table (site of FUN_180489040).
+/// @note Bucket array = buckets, length = (mask+1)*0x10. The header is exactly the per-kind entry
+///       of the registry root (see HandlerRegistryRoot).
+struct HandlerHashTable {  std::uint8_t unknown_0x00[0x18]; ///< 0x00..0x17: Unknown
+  void* buckets;                   ///< 0x18: Bucket array
+  std::uint8_t unknown_0x20[0x10]; ///< 0x20..0x2F: Unknown
+  std::uint64_t mask;              ///< 0x30: Bucket-count mask
+  std::uint8_t unknown_0x38[0x8];  ///< 0x38..0x3F: Unknown (alignment padding)
 };
 
 static_assert(std::is_standard_layout_v<HandlerHashTable>);
@@ -74,16 +82,18 @@ static_assert(offsetof(HandlerHashTable, buckets) == 0x18);
 static_assert(offsetof(HandlerHashTable, mask) == 0x30);
 static_assert(sizeof(HandlerHashTable) == 0x40);
 
-// 哈希表桶数组的元素大小（FUN_1806083f0 现场：桶数组长度 = (mask+1)*0x10）。
+/// @brief Element size of the hash-table bucket array (site of FUN_1806083f0: bucket array length
+///   = (mask+1)*0x10).
 inline constexpr std::size_t kHandlerBucketBytes = 0x10;
 
-// 处理器注册表根（FUN_1804891b0(root) 建立）：每个 kind 一个哈希表。
-//   +0x00 效果表（kind=2）、+0x40 集合表（kind=3）、+0x80 需求表。
-// 引擎运行时的注册表与初始化时的注册表是不同对象，销毁期必须先校验根内存可读。
+/// @brief Handler registry root (established by FUN_1804891b0(root)): one hash table per kind.
+/// @note +0x00 effects table (kind=2), +0x40 collections table (kind=3), +0x80 requirements table.
+///       The engine's runtime registry and the initialization-time registry are different objects,
+///       so destruction must first verify that the root memory is readable.
 struct HandlerRegistryRoot {
-  HandlerHashTable effects;      // 0x00: 效果表（kind=2）
-  HandlerHashTable collections;  // 0x40: 集合表（kind=3）
-  HandlerHashTable requirements; // 0x80: 需求表
+  HandlerHashTable effects;      ///< 0x00: Effects table (kind=2)
+  HandlerHashTable collections;  ///< 0x40: Collections table (kind=3)
+  HandlerHashTable requirements; ///< 0x80: Requirements table
 };
 
 static_assert(std::is_standard_layout_v<HandlerRegistryRoot>);

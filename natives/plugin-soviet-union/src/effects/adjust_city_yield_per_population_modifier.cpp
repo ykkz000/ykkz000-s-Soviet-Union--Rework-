@@ -1,4 +1,4 @@
-#include "city_yield_per_population.h"
+#include "adjust_city_yield_per_population_modifier.h"
 
 #include <atomic>
 #include <cstddef>
@@ -8,6 +8,7 @@
 #include <mutex>
 #include <vector>
 
+#include <ykkz000/bridge/host.h>
 #include <ykkz000/civ6/city.h>
 #include <ykkz000/civ6/effect.h>
 #include <ykkz000/civ6/tracked_value.h>
@@ -16,34 +17,41 @@
 #include "city_yield_common.h"
 #include "engine_access.h"
 
-// 城市产出修正的注入 host：在引擎的产出读取路径 City::Instance::CalculateYield 上追加
-// 两条“读取时乘算”的修正——
-//   1) 每市民 × Amount% ：percent[y] × population；
-//   2) 每宗主城邦 × Amount%：per_suzerain_percent[y] × 当前宗主数。
-// 两者都聚合进 PlayerExtras 的 city_extras 侧表（顶层键 = 玩家 id，子键 = city_id），
-// 写入由各自的模块负责（本模块 = 每市民，city_yield_per_suzerain = 每宗主）；本模块
-// 独占 CalculateYield 的 hook，另一个模块只写侧表、不安装 hook。
+// Injection host for city-yield modifiers: append two "multiply at read time" modifiers on the
+// engine's yield read path City::Instance::CalculateYield --
+//   1) per citizen x Amount% : percent[y] x population;
+//   2) per suzerain city x Amount% : per_suzerain_percent[y] x current suzerain count.
+// Both aggregate into the PlayerExtras city side table (top-level key = player id, sub-key =
+// city_id); each module owns its own writes (this module = per citizen,
+// adjust_city_yield_modifier_per_suzerain = per suzerain). This module owns the single
+// CalculateYield hook; the other module only writes the side table and installs no hook.
 //
-// 思路：Apply/Remove 只把“每市民百分比/每宗主百分比”聚合进侧表，真正的乘算发生在
-// 引擎的产出读取路径——返回前按引擎自己的方式追加一条修正步：
-// TrackedValue::AddStep(out+0x30, step, 0, 0, tooltipKey)，
-//   step.value = (percent[yield] * population + per_suzerain[yield] * suzerains) >> 8。
-// 因此人口/宗主数变化、产出重算天然使用最新值，无需 ChangePopulation hook，也无
-// “已应用基准”记账；同参数重复实例只是对称的 += / -=，无歧义、无漂移。
+// Rationale: Apply/Remove only aggregate the per-citizen/per-suzerain percentage into the side
+// table; the actual multiplication happens on the engine's yield read path -- before returning, a
+// modifier step is appended the way the engine itself does:
+// TrackedValue::AddStep(out+0x30, step, 0, 0, tooltipKey),
+//   step.value = (percent[yield] * population + per_suzerain[yield] * suzerains) >> 8.
+// Population/suzerain changes and yield recomputation therefore always use the latest values, with
+// no ChangePopulation hook and no "already applied baseline" bookkeeping; repeated instances with
+// the same parameters are symmetric += / -=, with no ambiguity and no drift.
 //
-// 注入点（发布构建 RVA 0x12FF20）：
+// Injection point (release build RVA 0x12FF20):
 //   TrackedValue* City::Instance::CalculateYield(City* this, TrackedValue* out,
 //                                                int yield, int typeHash, bool record_steps)
-//   out 为 sret（函数写它并以 RAX 返回）：基础累计 out+0x10；修正子对象 out+0x30，
-//   其累计值 out+0x40（FixedPoint<8>，256 == +1%，最终产出 = base * (1 + modifier / 25600)）。
+//   out is the sret (the function writes it and returns it in RAX): base accum at out+0x10;
+//   modifier sub-object at out+0x30, its accumulated value at out+0x40 (FixedPoint<8>, 256 == +1%,
+//   final yield = base * (1 + modifier / 25600)).
 //
-// 用 AddStep 而非直接写 out+0x40：数值与明细同源，引擎在 record_steps 的读取路径
-// （发布 FUN_180132B60，城市产出明细面板）会把整份 TrackedValue 连同明细步搬走，
-// 故我们这条修正会出现在面板明细里；直接写累计则只有数字、没有明细行。
+// Using AddStep instead of writing out+0x40 directly keeps the number and the detail rows from the
+// same source: on the record_steps read path (release FUN_180132B60, the city-yield detail panel)
+// the engine copies the whole TrackedValue together with its detail steps, so our modifier shows up
+// in the panel detail; writing the accumulator directly would only change the number, with no
+// detail row.
 namespace ykkz000::plugin {
 namespace {
 
-// CalculateYield 返回对象（TrackedValue）内的偏移：修正子对象与其内累计值。
+// Offsets inside the TrackedValue returned by CalculateYield: the modifier sub-object and its
+// accumulated value.
 constexpr std::size_t kModifierPartOffset = offsetof(civ6::TrackedValue, modifier);
 constexpr std::size_t kValueOffset = offsetof(civ6::YieldValue, value);
 constexpr std::size_t kModifierAccumulatedOffset = kModifierPartOffset + kValueOffset;
@@ -51,14 +59,15 @@ constexpr std::size_t kModifierAccumulatedOffset = kModifierPartOffset + kValueO
 using CalculateYieldFn = void* (*)(void* city, void* out, int yield, int type_hash,
                                    bool record_steps);
 
-// 引擎自身入口 TrackedValue::AddStep（发布 RVA 0x12FC10）：把一条修正并入修正子对象
-// 的累计值，并在 record_steps 时落一条带 tooltip 键的明细。第 3/4 实参为引擎固定传入
-// 的 0（见便捷重载 0x12FCE0），第 5 实参在栈上传入本地化键。
+// The engine's own entry TrackedValue::AddStep (release RVA 0x12FC10): merges a modifier into the
+// accumulated value of the modifier sub-object and, when record_steps is set, drops a detail row
+// carrying the tooltip key. Arguments 3/4 are always 0 as the engine passes them (see the
+// convenience overload 0x12FCE0); argument 5 passes the localization key on the stack.
 using AddStepFn = void (*)(void* modifier_part, civ6::YieldValue* step, std::uint32_t arg3,
                            std::uint32_t arg4, const char* tooltip_key);
 
-// 复用引擎 game effects 修正的同一 tooltip 键：无需新增本地化文本，且明细行语义正确
-// （本效果本就是一类城市产出修正）。
+// Reuse the same tooltip key as the engine's game-effects modifier: no new localized text is
+// needed, and the detail row is semantically correct (this effect is itself a city-yield modifier).
 constexpr char kModifierTooltipKey[] =
     "LOC_CITY_YIELD_FROM_MODIFIER_GAMEEFFECTS_TOOLTIP";
 
@@ -67,8 +76,9 @@ CalculateYieldFn kCalculateYieldOriginal = nullptr;
 void* kCalculateYieldTarget = nullptr;
 bool kCalculateYieldInstalled = false;
 
-// 运行期 dry-run（只记录不修改）：由环境变量 YKKZ000_CITY_YIELD_DRY_RUN 开启，
-// 用于上线前按实测值域确认 TrackedValue 布局。默认关闭。
+// Runtime dry-run (log only, do not modify): enabled by the environment variable
+// YKKZ000_CITY_YIELD_DRY_RUN, used to confirm the TrackedValue layout against real values before
+// release. Off by default.
 bool DryRunEnabled() {
   static const bool enabled = []() {
     char* value = nullptr;
@@ -83,7 +93,8 @@ bool DryRunEnabled() {
   return enabled;
 }
 
-// 把条目按 sign(±1) 聚合进侧表的 percent[]：percent += sign * Amount * kPercentUnit。
+// Aggregate entries into the side table's percent[] by sign(+-1): percent += sign * Amount *
+// kPercentUnit.
 void ApplyEntries(void* self, void* city, int sign) {
   if (self == nullptr || city == nullptr) {
     return;
@@ -131,10 +142,11 @@ void ApplyEntries(void* self, void* city, int sign) {
           }
         }
       });
-  // 侧表变化后失效引擎的城市产出缓存，并发送一条 0 增量的“产出已变化”通知（细节见
-  // city_yield_common：清 city+0x1950 有效标志 + ChangeYieldModifier(city, yield, 0)）。
-  // 幂等：重复 Apply/Remove 只是重复清零。必须在 Apply/Remove 做，绝不能放进
-  // CalculateYield hook（否则每次读取都触发重算/通知）。
+  // After the side table changes, invalidate the engine's city-yield cache and send a zero-delta
+  // "yield changed" notification (details in city_yield_common: clear the valid flag in
+  // city+0x1950 + ChangeYieldModifier(city, yield, 0)). Idempotent: repeated Apply/Remove just
+  // clears again. This must happen in Apply/Remove, never inside the CalculateYield hook
+  // (otherwise every read would trigger a recompute/notification).
   InvalidateAndNotifyCityYield(city, entries);
   if (sign < 0) {
     extra::PlayerExtras().EraseIfEmptyCity(ref.player_id, ref.city_id);
@@ -142,11 +154,11 @@ void ApplyEntries(void* self, void* city, int sign) {
   InvalidateCityExtraSnapshotCache();
 }
 
-// 命中计数：长期 0 命中给一次 level-0 告警（避免静默失效）。
+// Hit counters: warn once at level 0 when hits stay at zero for a long time (avoid silent failure).
 std::atomic<long> kCallCount{0};
 std::atomic<long> kHitCount{0};
 
-// 命中探针：限流打印关键量，便于判定“数值是否进入引擎”。
+// Hit probe: rate-limited logging of key quantities, to tell whether numbers reach the engine.
 void LogHit(const CityRef& ref, int yield, int population, int suzerains,
             std::int64_t delta, long hit) {
   LogF(2, "city-yield: hit#%ld yield=%d pop=%d suzerains=%d player=%d city=%d delta=%lld",
@@ -157,7 +169,8 @@ void LogHit(const CityRef& ref, int yield, int population, int suzerains,
 void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
                           bool record_steps) {
   if (kCalculateYieldOriginal == nullptr) {
-    // 已启用但跳板为空：引擎产出读取会被吞掉。正常不应出现；一旦出现必须可见。
+    // Enabled but the trampoline is null: the engine's yield read calls would be swallowed. This
+    // should not happen; if it does it must be visible.
     static std::atomic<bool> kLoggedNoTrampoline{false};
     if (!kLoggedNoTrampoline.exchange(true)) {
       Log(0, "city-yield: detour without trampoline; call dropped");
@@ -171,7 +184,8 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
   }
 
   const long call = ++kCallCount;
-  // 若已有 Apply（侧表被写过）却始终未命中，说明注入点或键不成立，给一次告警。
+  // If Apply already happened (the side table was written) yet this hook never hits, the injection
+  // point or the key must be wrong: warn once.
   if (call >= 8192 && kHitCount.load(std::memory_order_relaxed) == 0 &&
       CityExtraSnapshotGeneration() != 0) {
     static std::atomic<bool> kLoggedNeverHit{false};
@@ -210,7 +224,8 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
   }
   int suzerains = 0;
   if (per_suzerain != 0) {
-    // 宗主数按带 TTL 的缓存读取（遍历玩家向量是热路径上的昂贵操作）。
+    // The suzerain count is read through a TTL cache (walking the player vector is expensive on the
+    // hot path).
     suzerains = SuzerainCountForPlayer(ref.player_id);
     if (suzerains > 0) {
       delta += (static_cast<std::int64_t>(per_suzerain) * suzerains) >> 8;
@@ -227,7 +242,7 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
   }
   if (delta < std::numeric_limits<std::int32_t>::min() ||
       delta > std::numeric_limits<std::int32_t>::max()) {
-    return returned; // percent/population/suzerains 离谱：跳过而不是写入溢出值
+    return returned; // percent/population/suzerains out of range: skip instead of writing overflow
   }
   const long hit = ++kHitCount;
   const bool log_this = hit <= 16 || (hit % 4096) == 0;
@@ -245,8 +260,9 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
     return returned;
   }
 
-  // 首选引擎原生 AddStep：数值并入 modifier.value，record_steps 时同时落一条可见明细，
-  // 与引擎自带的 game effects / 宗教 / 总督头衔等修正完全同构。
+  // Prefer the engine's native AddStep: the value merges into modifier.value and, when record_steps
+  // is set, a visible detail row is emitted, exactly like the engine's own game-effects / religion
+  // / governor-title modifiers.
   const bridge::EngineApi* engine = Context().engine;
   const auto add_step = engine != nullptr && engine->trackedValueAddStep != nullptr
                             ? reinterpret_cast<AddStepFn>(engine->trackedValueAddStep)
@@ -258,7 +274,8 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
         static_cast<std::uint8_t*>(returned) + kModifierPartOffset;
     add_step(modifier_part, &step, 0, 0, kModifierTooltipKey);
   } else {
-    // 退化：引擎未暴露 AddStep（旧构建）时直接累加修正累计；无明细行。
+    // Degraded path: when the engine does not expose AddStep (older builds), add directly to the
+    // modifier accumulator; there is no detail row.
     const std::int64_t updated = static_cast<std::int64_t>(modifier) + delta;
     if (updated < std::numeric_limits<std::int32_t>::min() ||
         updated > std::numeric_limits<std::int32_t>::max()) {
@@ -283,8 +300,9 @@ bool InstallHooksOnce() {
     return false;
   }
   std::lock_guard<std::mutex> guard(kHookMutex);
-  // 幂等前置：已安装且跳板可用即视为成功。避免对已启用的 hook 重复 enable，也避免在
-  // loader 误报失败时把仍然生效的跳板清空。
+  // Idempotent fast path: already installed with a usable trampoline counts as success. This avoids
+  // re-enabling an enabled hook and avoids clearing a still-effective trampoline when the loader
+  // wrongly reports failure.
   if (kCalculateYieldInstalled && kCalculateYieldOriginal != nullptr &&
       kCalculateYieldTarget != nullptr) {
     return true;
@@ -295,8 +313,9 @@ bool InstallHooksOnce() {
                                        reinterpret_cast<void**>(&kCalculateYieldOriginal));
   if (status != 0) {
     LogF(0, "city-yield: CalculateYield hook install -> %d", status);
-    // 先撤销接管确保 hook 不再拦截，再清空跳板；顺序反转会留下“已启用但跳板为空”的
-    // 状态，使 detour 吞掉引擎的每一次产出读取调用。
+    // Undo the takeover first so the hook stops intercepting, then clear the trampoline; reversing
+    // the order would leave an "enabled but null trampoline" state where the detour swallows every
+    // engine yield read.
     (void)host->removeHook(host->pluginHandle, target);
     kCalculateYieldOriginal = nullptr;
     kCalculateYieldInstalled = false;
@@ -311,27 +330,72 @@ bool InstallHooksOnce() {
   return true;
 }
 
-// 清空侧表并令所有线程的 TLS 缓存失效（代际自增对所有线程可见）。
-// 注意：PlayerExtras() 与 strength 模块共用同一张表；重复 Clear 幂等（清空即空表），
-// 但只应在上下文创建/销毁或插件卸载这些“全局失效”时机调用。
+// Clear the side table and invalidate the TLS snapshot cache on all threads (the generation bump is
+// visible to everyone).
+// Note: PlayerExtras() is shared with the strength module; repeated Clear is idempotent (clearing
+// an empty table), but it should only be called at global-invalidation points (context
+// creation/destruction or plugin unload).
 void ClearExtras() {
   extra::PlayerExtras().Clear();
   ResetCityYieldCommonCaches();
 }
 
-// 本模块的 hook 安装入口：无捕获 lambda（可作函数指针），状态留在文件作用域供 detour
-// 与上下文回调共用。入口不可用时返回 0：效果退化为不缩放，不因此让整次注册失败。
+// Stop the City::Instance::CalculateYield hook (idempotent) and clear the side table and caches.
+void UninstallHook() {
+  const bridge::Host* host = Context().host;
+  std::lock_guard<std::mutex> guard(kHookMutex);
+  if (kCalculateYieldInstalled && host != nullptr && host->removeHook != nullptr &&
+      kCalculateYieldTarget != nullptr) {
+    (void)host->removeHook(host->pluginHandle, kCalculateYieldTarget);
+    kCalculateYieldInstalled = false;
+  }
+  ClearExtras();
+}
+
+// Context lifecycle: enable the hook and clear the side table on created; disable and clear on
+// destroyed.
+void OnContext(bridge::GameContextEvent event, void* /*context*/) {
+  if (event == bridge::GameContextEvent::kCreated) {
+    (void)InstallHooksOnce();
+    ClearExtras(); // New context: old city keys are all invalid
+    return;
+  }
+  UninstallHook();
+}
+
+// Plugin unload cleanup: stop the hook and clear the caches.
+void Shutdown() { UninstallHook(); }
+
+std::uint64_t Apply(void* self, void* a1, void* a2, void* a3) {
+  (void)a2;
+  (void)a3;
+  ApplyEntries(self, a1, 1);
+  return static_cast<std::uint64_t>(1);
+}
+
+std::uint64_t Remove(void* self, void* a1, void* a2, void* a3) {
+  (void)a2;
+  (void)a3;
+  ApplyEntries(self, a1, -1);
+  return static_cast<std::uint64_t>(1);
+}
+
+// This module's hook install entry: a capture-less lambda (usable as a function pointer), with state
+// kept at file scope for the detour and the context callback to share. Returns 0 when the entry is
+// unavailable: the effect degrades to no scaling and the whole registration does not fail because of
+// it.
 const bridge::EffectPrepareFn kCityYieldPrepare = +[](void* /*userData*/) -> int {
   (void)InstallHooksOnce();
   return 0;
 };
 
-// 常驻装配对象：loader 长期持有 impl 指针，不可为临时对象。
+// Resident assembly objects: the loader keeps the impl pointer, so they must not be temporaries.
 bridge::EffectImpl g_impl = {};
 bridge::EffectDesc g_desc = {};
 bool g_described = false;
 
-// 装配本模块的 EffectImpl/EffectDesc；返回常驻的 desc 供 plugin.cpp 登记。
+// Assemble this module's EffectImpl/EffectDesc; returns the resident desc for plugin.cpp to
+// register.
 const bridge::EffectDesc* Describe(const bridge::Host& host) {
   (void)host;
   if (g_described) {
@@ -346,62 +410,23 @@ const bridge::EffectDesc* Describe(const bridge::Host& host) {
   }
   g_impl.templateApply = engine->effectApply;
   g_impl.templateRemove = engine->effectRemove;
-  g_impl.apply = &CityYieldApply;
-  g_impl.remove = &CityYieldRemove;
+  g_impl.apply = &Apply;
+  g_impl.remove = &Remove;
   g_impl.label = "city-yield-per-population";
   g_desc.impl = &g_impl;
   g_desc.prepare = kCityYieldPrepare;
 #else
-  g_desc.impl = nullptr;    // 关闭自定义行为：退化为模板行为
-  g_desc.prepare = nullptr; // 不装 hook
+  g_desc.impl = nullptr;    // Custom behavior disabled: degrade to the template behavior
+  g_desc.prepare = nullptr; // No hook
 #endif
   g_described = true;
   return &g_desc;
 }
 
-const EffectModule g_module = {"city-yield-per-population", &Describe, &CityYieldOnContext,
-                               &CityYieldShutdown};
+const EffectModule g_module = {"city-yield-per-population", &Describe, &OnContext, &Shutdown};
 
 } // namespace
 
 const EffectModule* CityYieldModule() { return &g_module; }
-
-void CityYieldUninstallHook() {
-  const bridge::Host* host = Context().host;
-  std::lock_guard<std::mutex> guard(kHookMutex);
-  if (kCalculateYieldInstalled && host != nullptr && host->removeHook != nullptr &&
-      kCalculateYieldTarget != nullptr) {
-    (void)host->removeHook(host->pluginHandle, kCalculateYieldTarget);
-    kCalculateYieldInstalled = false;
-  }
-  ClearExtras();
-}
-
-void CityYieldOnContext(bridge::GameContextEvent event, void* /*context*/) {
-  if (event == bridge::GameContextEvent::kCreated) {
-    (void)InstallHooksOnce();
-    ClearExtras(); // 新上下文：旧城市键全部失效
-    return;
-  }
-  CityYieldUninstallHook();
-}
-
-void CityYieldShutdown() {
-  CityYieldUninstallHook();
-}
-
-std::uint64_t CityYieldApply(void* self, void* a1, void* a2, void* a3) {
-  (void)a2;
-  (void)a3;
-  ApplyEntries(self, a1, 1);
-  return static_cast<std::uint64_t>(1);
-}
-
-std::uint64_t CityYieldRemove(void* self, void* a1, void* a2, void* a3) {
-  (void)a2;
-  (void)a3;
-  ApplyEntries(self, a1, -1);
-  return static_cast<std::uint64_t>(1);
-}
 
 } // namespace ykkz000::plugin

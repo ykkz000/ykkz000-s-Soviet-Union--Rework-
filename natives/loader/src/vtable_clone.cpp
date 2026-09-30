@@ -12,17 +12,18 @@
 namespace ykkz000::loader {
 namespace {
 
-// 注册与查询可能来自不同线程（插件注册 vs 引擎 DatabaseWriter 读取），
-// 因此对名字表加锁。#unordered_map 为节点式存储，元素指针在 rehash 后仍
-// 有效；rememberTypeName 对已存在的 hash 不覆盖值，使已返回的 c_str() 指针
-// 在进程生命周期内持续有效（引擎可能长期持有 GetTypeName 的返回值）。
+// Registration and lookup may come from different threads (plugin registration vs. engine
+// DatabaseWriter reads), hence the lock on the name table. #unordered_map stores nodes, so element
+// pointers remain valid after a rehash; rememberTypeName does not overwrite the value for an
+// existing hash, keeping an already-returned c_str() pointer valid for the process lifetime (the
+// engine may hold the GetTypeName return value for a long time).
 std::mutex g_typeNamesMutex;
 std::unordered_map<std::uint32_t, std::string> g_typeNames;
 
 } // namespace
 
-// 替换工厂 vtable 的 GetTypeName 槽：签名等价于
-//   const char* GetTypeName() const  (this 位于 RCX，返回值位于 RAX)
+// Replace the factory vtable's GetTypeName slot: the signature is equivalent to
+//   const char* GetTypeName() const  (this in RCX, return value in RAX)
 extern "C" const char* ykkz000_GetTypeName(void* self) {
   if (self == nullptr) {
     return "";
@@ -67,10 +68,10 @@ void* cloneFactoryVTable(void* templateFactory) {
   if (block == nullptr) {
     return nullptr;
   }
-  block[0] = source[-1]; // MSVC 的 RTTI/COL 指针，必须一并保留
+  block[0] = source[-1]; // MSVC's RTTI/COL pointer, must be preserved as well
   std::memcpy(block + civ6::kVTableRttiPrefixSlots, source, sizeof(void*) * slots);
 
-  void** vtable = block + civ6::kVTableRttiPrefixSlots; // 交回引擎与调用方的 vptr
+  void** vtable = block + civ6::kVTableRttiPrefixSlots; // the vptr handed back to the engine and callers
   vtable[civ6::kFactoryTypeNameSlot] = reinterpret_cast<void*>(&ykkz000_GetTypeName);
   logMessageF(1, "clone: block=%p vtable=%p nameSlot=%zX rtti=%p", block, vtable,
               civ6::kFactoryTypeNameSlot, block[0]);

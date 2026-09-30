@@ -5,62 +5,96 @@
 
 #include <ykkz000/extra/player_extra.h>
 
-// 城市产出修正效果的公共工具：被 city-yield-per-population（持有 CalculateYield
-// hook）与 city-yield-per-suzerain（只聚合、无 hook）两个模块共用，避免两处实现
-// 解析/键/缓存失效逻辑时产生细微分歧。
+/// @file city_yield_common.h
+/// @brief Shared utilities for city-yield modifier effects.
+/// @note Shared by the city-yield-per-population module (which owns the CalculateYield hook) and
+///       the city-yield-per-suzerain module (aggregation only, no hook), so that parsing/key/
+///       cache-invalidation logic cannot drift subtly between two implementations.
 namespace ykkz000::plugin {
 
-// 效果对象上的一个 (YieldType, Amount) 条目。语义由调用方决定：
-//   每市民模块把 Amount 当“每市民百分比”，每宗主模块当“每宗主百分比”。
+/// @brief One (YieldType, Amount) entry on an effect object.
+/// @note The caller decides the semantics: the per-population module treats Amount as
+///       "percent per citizen" and the per-suzerain module as "percent per suzerain".
 struct EffectEntry {
   int yield_type = 0;
   int amount = 0;
 };
 
-// 由城市实例取侧表键（读 City+0xD8 玩家 / City+0xA8 城市 id，做合理性校验）。
-// 顶层键即该城市所属玩家（PlayerExtras 以玩家为单位隔离重复文明/领袖）。
+/// @brief Side-table key derived from a city instance (reads City+0xD8 player / City+0xA8 city
+///        id and sanity-checks them).
+/// @note The top-level key is the player owning the city (PlayerExtras isolates duplicate
+///       civilizations/leaders per player).
 struct CityRef {
   std::int32_t player_id = -1;
   std::int32_t city_id = -1;
 };
 
-// percent[]/per_suzerain_percent[] 的编码：Amount(%) × 0x10000 =>
-// 0x10000 == +1%（每市民或每宗主）。读取时 (值 × 因子) >> 8 得到引擎修正单位。
+/// @brief Encoding of percent[]/per_suzerain_percent[]: Amount(%) × 0x10000.
+/// @note 0x10000 == +1% (per citizen or per suzerain). Reading as (value × factor) >> 8 yields
+///       engine modifier units.
 inline constexpr std::int32_t kPercentUnit = 0x10000;
 
-// 单条 Amount 的合理上限（防御解析错误导致的异常值）。
+/// @brief Plausibility cap for a single Amount (defends against parse errors producing absurd
+///        values).
 inline constexpr int kMaxPlausibleAmount = 100000;
 
-// 读取效果对象上的 (YieldType, Amount) 条目，与 Effects::AdjustCityYieldModifier
-// 的遍历结构一致；条目不可信时返回 false。
+/// @brief Reads the (YieldType, Amount) entries on an effect object.
+/// @param[in] self Effect object.
+/// @param[out] out Receives the entry list.
+/// @return true on success; false when the entries are untrustworthy.
+/// @note Matches the traversal structure of Effects::AdjustCityYieldModifier.
 [[nodiscard]] bool ReadEffectEntries(void* self, std::vector<EffectEntry>& out);
 
-// 由城市实例解析侧表键（读 +0xD8 玩家 / +0xA8 城市 id）。
+/// @brief Resolves the side-table key from a city instance (reads +0xD8 player / +0xA8 city id).
+/// @param[in] city City instance.
+/// @param[out] ref Receives the side-table key.
+/// @return true on success.
 [[nodiscard]] bool CityRefOf(const void* city, CityRef& ref);
 
-// 清 city+0x1950 中某产出的缓存有效标志，迫使引擎下次读取时重算（越界产出忽略）。
+/// @brief Clears one yield's cache-valid flag in city+0x1950, forcing the engine to recompute on
+///        its next read.
+/// @param[in] city City instance.
+/// @param[in] yield_type Yield type.
+/// @note Out-of-range yields are ignored.
 void InvalidateCityYieldCache(void* city, int yield_type);
-// 以 0 增量调用 ChangeYieldModifier：不改数值数组，但走引擎的“产出已变化”通知/失效分发。
+/// @brief Calls ChangeYieldModifier with a zero delta.
+/// @param[in] city City instance.
+/// @param[in] yield_type Yield type.
+/// @note Does not change the value array, but goes through the engine's "yield changed"
+///       notification/invalidation dispatch.
 void NotifyCityYieldChanged(void* city, int yield_type);
-// 对一组条目做上面两步（越界产出跳过）；Apply/Remove 后调用以刷新引擎缓存。
+/// @brief Performs both steps above for a set of entries (out-of-range yields are skipped).
+/// @param[in] city City instance.
+/// @param[in] entries Entry list.
+/// @note Call after Apply/Remove to refresh the engine caches.
 void InvalidateAndNotifyCityYield(void* city, const std::vector<EffectEntry>& entries);
 
-// 读路径 TLS 快照：同键的连续查询直接命中；未命中再查表并按需回填。
-// 无条目返回 nullptr。以侧表键（玩家 id + 城市 id）为缓存标识，避免用城市指针。
+/// @brief Read-path TLS snapshot: consecutive lookups of the same key hit directly; on a miss it
+///        queries the table and backfills as needed.
+/// @param[in] player_id Player id.
+/// @param[in] city_id City id.
+/// @return Side-table entry pointer on hit, nullptr when there is no entry.
+/// @note Uses the side-table key (player id + city id) as the cache identity to avoid keying on
+///       the city pointer.
 [[nodiscard]] const extra::CityExtra* LookupCityExtra(std::int32_t player_id,
                                                       std::int32_t city_id);
 
-// 侧表写后失效：写代际自增（令所有线程的 TLS 快照失效）并清本线程 TLS。
+/// @brief Post-write side-table invalidation: bumps the write generation (invalidating all
+///        threads' TLS snapshots) and clears this thread's TLS.
 void InvalidateCityExtraSnapshotCache();
 
-// 侧表写代际（诊断用）：非 0 表示 Apply/Remove 或上下文清表曾发生。
+/// @brief Gets the side-table write generation (for diagnostics).
+/// @return Generation number; non-zero means Apply/Remove or a context table clear has occurred.
 [[nodiscard]] std::uint64_t CityExtraSnapshotGeneration();
 
-// 上下文销毁/新局：清 TLS 快照与宗主数缓存。
+/// @brief Context destruction/new game: clears the TLS snapshot and the suzerain-count cache.
 void ResetCityYieldCommonCaches();
 
-// 带 TTL 缓存的宗主数（CountSuzerainsOfPlayer 会遍历玩家向量，而本读取是热路径）。
-// 不可信时返回 -1；0 是合法值。TTL 内的滞后最多一个 TTL。
+/// @brief TTL-cached suzerain count.
+/// @param[in] player_id Player id.
+/// @return Suzerain count; -1 when untrustworthy (0 is a valid value).
+/// @note CountSuzerainsOfPlayer walks the player vector, whereas this read is on a hot path.
+///       Within the TTL the staleness is at most one TTL.
 [[nodiscard]] int SuzerainCountForPlayer(std::int32_t player_id);
 
 } // namespace ykkz000::plugin

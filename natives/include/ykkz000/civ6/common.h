@@ -4,38 +4,51 @@
 #include <cstdint>
 #include <type_traits>
 
-// GameCore 引擎运行时内存布局（由 GameCore_XP2_FinalRelease.dll 逆向确认）。
-//
-// 本目录只描述布局：类型仅含 POD 数据成员（void*、定长整数、定长数组），不含
-// 虚函数、基类与非平凡成员，也不调用任何引擎函数；每个已知字段以 static_assert
-// 锁定偏移与大小。loader 侧的硬编码偏移与 vtable 槽号必须改为引用此处的类型
-// （offsetof / sizeof / 槽位常量），使引擎布局只存在一个事实来源。
+/// @file common.h
+/// @brief Common definitions for the GameCore engine's runtime memory layout.
+/// @note The layout was confirmed by reverse engineering GameCore_XP2_FinalRelease.dll. This
+///       directory describes layout only: types contain only POD data members (void*, fixed-width
+///       integers, fixed-length arrays), with no virtual functions, base classes, or non-trivial
+///       members, and call no engine functions; each known field pins its offset and size with a
+///       static_assert. Hard-coded offsets and vtable slot numbers on the loader side must be
+///       changed to reference the types here (offsetof / sizeof / slot constants), so the engine
+///       layout has a single source of truth.
 namespace ykkz000::civ6 {
 
-// 产出向量上限。DLC/模组会改变实际产出数，故运行期再与引擎真实长度取小校验，
-// 不把某个具体构建的产出数写死。用于 extra::CityExtra 等按 YieldTypes 索引的定长数组。
-// 目录语义：civ6/ 只镜像引擎布局；extra/ 存放本模组叠加数据与侧表。
+/// @brief Upper bound on the yield vector.
+/// @note DLC/mods can change the actual number of yields, so this is validated at runtime by
+///       taking the minimum against the engine's real length, instead of hard-coding the yield
+///       count of a particular build. Used for fixed-length arrays indexed by YieldTypes, such as
+///       extra::CityExtra.
+/// @note Directory semantics: civ6/ mirrors the engine layout only; extra/ holds this mod's
+///       overlay data and side tables.
 inline constexpr std::size_t kMaxYields = 64;
 
-// —— MSVC vtable 前置槽 ——
-// vtable[-1] 为 RTTI/COL 指针，克隆 vtable 时必须一并复制。否则新 vptr 前方是
-// HeapAlloc 块头，引擎的 dynamic_cast/typeid/异常展开会把堆头当指针用而写坏内存。
+/// @brief Number of MSVC vtable prefix slots.
+/// @note vtable[-1] is the RTTI/COL pointer and must be copied along when cloning a vtable.
+///       Otherwise the memory in front of the new vptr is a HeapAlloc block header, and the
+///       engine's dynamic_cast/typeid/exception unwinding would treat that header as a pointer and
+///       corrupt memory.
 inline constexpr std::size_t kVTableRttiPrefixSlots = 1;
 
-// IModifierEffectFactory 工厂对象的 vtable 宽度与关键槽位。
-// 该接口宽于 6 槽：实测会在槽 6（+0x30）上分发，克隆必须“足够宽且完整复制”，
-// 绝不能只复制 6 个，否则越界读到堆垃圾并跳到 0xFFFFFFFF。
+/// @brief Vtable width of an IModifierEffectFactory object.
+/// @note The interface is wider than 6 slots: in practice it dispatches on slot 6 (+0x30), so a
+///       clone must be "wide enough and fully copied" and must never copy only 6 slots, or it will
+///       read past the end into heap garbage and jump to 0xFFFFFFFF.
 inline constexpr std::size_t kFactoryVTableSlots = 24;
+/// @brief GetTypeId slot in the factory vtable.
 inline constexpr std::size_t kFactoryTypeIdSlot = 1;
+/// @brief GetTypeName slot in the factory vtable.
 inline constexpr std::size_t kFactoryTypeNameSlot = 2;
+/// @brief Create slot in the factory vtable.
 inline constexpr std::size_t kFactoryCreateSlot = 5;
 
-// std::vector 三指针视图（MSVC 布局）。
+/// @brief Three-pointer std::vector view (MSVC layout).
 template <typename T>
 struct VectorView {
-  T* begin;    // 0x00: 首元素
-  T* end;      // 0x08: 尾后
-  T* capacity; // 0x10: 容量末尾
+  T* begin;    ///< 0x00: First element
+  T* end;      ///< 0x08: One past the last element
+  T* capacity; ///< 0x10: End of capacity
 };
 
 static_assert(std::is_standard_layout_v<VectorView<void*>>);
@@ -44,12 +57,13 @@ static_assert(offsetof(VectorView<void*>, end) == 0x08);
 static_assert(offsetof(VectorView<void*>, capacity) == 0x10);
 static_assert(sizeof(VectorView<void*>) == 0x18);
 
-// std::shared_ptr 视图（MSVC 布局）。FUN_18092A4F0 的构造上下文里，
-// “指针字段 + 其 +0x08 控制块”成对出现，即 shared_ptr。
+/// @brief std::shared_ptr view (MSVC layout).
+/// @note In the construction context of FUN_18092A4F0, a "pointer field + its control block at
+///       +0x08" appear in pairs, i.e. a shared_ptr.
 template <typename T>
 struct SharedPtrView {
-  T* pointer;          // 0x00: 对象指针
-  void* control_block; // 0x08: 控制块
+  T* pointer;          ///< 0x00: Object pointer
+  void* control_block; ///< 0x08: Control block
 };
 
 static_assert(std::is_standard_layout_v<SharedPtrView<void>>);
