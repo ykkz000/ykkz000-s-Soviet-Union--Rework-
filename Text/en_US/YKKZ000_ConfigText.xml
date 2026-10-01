@@ -53,7 +53,7 @@
     <Row Tag="LOC_TRAIT_LEADER_YKKZ000_PEACE_DECREE_DESC">
       <Text>+50% Influence Points. All cities gain +5% [ICON_Production] Production and [ICON_Food] Food for each city-state you are Suzerain of.</Text>
     </Row>
-    <Row Tag="LOC_TRAIT_LEADER_YKKZ000_PEACE_DECREE_DESC_EXPANSION2">
+    <Row Tag="LOC_TRAIT_LEADER_YKKZ000_PEACE_DECREE_DESC">
       <Text>Cannot declare Surprise War, cannot declare war on a city-state, and cannot use the Holy War, Colonial War, or Territorial Expansion War casus belli.[NEWLINE]+50% Influence Points. +100% Diplomatic Favor from Suzerain city-states. All cities gain +5% [ICON_Production] Production and [ICON_Food] Food for each city-state you are Suzerain of.</Text>
     </Row>
     <Row Tag="LOC_TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_NAME">

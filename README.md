@@ -20,8 +20,7 @@ Supported languages: English, 简体中文.
 
 ### Leader: Vladimir Lenin
 
-- **Decree on Peace**: +50% Influence Points; all cities gain +5% Production and Food for each city-state you are Suzerain of.
-- **Decree on Peace (Gathering Storm)**, in addition: cannot declare Surprise Wars, cannot declare war on a city-state, and cannot use the Holy War, Colonial War, or Territorial Expansion War casus belli; +100% Diplomatic Favor from Suzerain city-states.
+- **Decree on Peace**: cannot declare Surprise Wars, cannot declare war on a city-state, and cannot use the Holy War, Colonial War, or Territorial Expansion War casus belli; +50% Influence Points; +100% Diplomatic Favor from Suzerain city-states; all cities gain +5% Production and Food for each city-state you are Suzerain of.
 - **Agenda: International** — likes civilizations that are at peace and hates civilizations that are at war.
 
 ### Leader: Joseph Stalin
