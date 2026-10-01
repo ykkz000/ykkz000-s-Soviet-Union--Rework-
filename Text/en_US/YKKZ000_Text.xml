@@ -11,6 +11,21 @@
     <Row Tag="LOC_DISTRICT_YKKZ000_STRATEGIC_PRODUCTION">
       <Text>+{1_num} [ICON_Production] Production from adjacent strategic resources.</Text>
     </Row>
+    <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_SCIENCE">
+      <Text>+{1_num} [ICON_Science] Science from the adjacent Kolkhoz.</Text>
+    </Row>
+    <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_CULTURE">
+      <Text>+{1_num} [ICON_Culture] Culture from the adjacent Kolkhoz.</Text>
+    </Row>
+    <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_FAITH">
+      <Text>+{1_num} [ICON_Faith] Faith from the adjacent Kolkhoz.</Text>
+    </Row>
+    <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_GOLD">
+      <Text>+{1_num} [ICON_Gold] Gold from the adjacent Kolkhoz.</Text>
+    </Row>
+    <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_PRODUCTION">
+      <Text>+{1_num} [ICON_Production] Production from the adjacent Kolkhoz.</Text>
+    </Row>
     <!-- Unit Abilities-->
     <Row Tag="LOC_ABILITY_YKKZ000_RED_ARMY_DEFENSE_OF_MOSCOW_NAME">
       <Text>Defense of Moscow</Text>
