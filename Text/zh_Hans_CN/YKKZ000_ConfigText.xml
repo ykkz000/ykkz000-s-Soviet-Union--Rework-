@@ -39,7 +39,7 @@
       <Text>各尽所能，按劳分配</Text>
     </Row>
     <Row Tag="LOC_TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK_DESC" Language="zh_Hans_CN">
-      <Text>所有城市每 [ICON_Citizen] 人口提供 0.5 [ICON_Production] 生产力，并每 [ICON_Citizen] 人口提供 +5% [ICON_Production] 生产力增幅。[NEWLINE]无法建造圣地，无法招募大预言家。</Text>
+      <Text>所有城市每 [ICON_Citizen] 人口提供 +5% [ICON_Production] 生产力增幅。相邻“集体农庄”的学院、商业中心、剧院广场获得等同于其相邻加成的 [ICON_Production] 生产力。[NEWLINE]无法建造圣地，无法招募大预言家。</Text>
     </Row>
     <Row Tag="LOC_TRAIT_CIVILIZATION_YKKZ000_KOLKHOZ_NAME" Language="zh_Hans_CN">
       <Text>集体农庄</Text>
@@ -51,7 +51,7 @@
       <Text>和平法令</Text>
     </Row>
     <Row Tag="LOC_TRAIT_LEADER_YKKZ000_PEACE_DECREE_DESC" Language="zh_Hans_CN">
-      <Text>无法宣布突袭战争，无法对城邦宣战，无法使用“圣战”“殖民战争”“领土扩张战争”战争借口。[NEWLINE]影响力点数 +50%。来自城邦的外交支持 +100%。每宗主一个城邦，所有城市 +5% [ICON_Production] 生产力和 [ICON_Food] 食物。</Text>
+      <Text>无法宣布突袭战争，无法对城邦宣战，无法使用“圣战”“殖民战争”“领土扩张战争”战争借口。[NEWLINE]影响力点数 +50%。每宗主一个城邦，所有城市 +5% [ICON_Production] 生产力。</Text>
     </Row>
     <Row Tag="LOC_TRAIT_LEADER_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_NAME" Language="zh_Hans_CN">
       <Text>大纵深作战理论</Text>
@@ -64,7 +64,7 @@
       <Text>集体农庄</Text>
     </Row>
     <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_DESCRIPTION" Language="zh_Hans_CN">
-      <Text>苏联特色区域，替代“工业区”。[NEWLINE]解锁科技为采矿业而非学徒制，且建造花费更低。[NEWLINE]提供1 [ICON_Housing] 住房。公民收益（区域内的每位公民）：+1 [ICON_Food] 食物，+1 [ICON_Production] 生产力。[NEWLINE][ICON_Production] 生产力相邻加成也能提供 [ICON_Food] 食物。每与一个矿山相邻获得+1 [ICON_Production] 生产力。每与一个战略资源相邻获得+2 [ICON_Production] 生产力。[NEWLINE]每与一个区域相邻获得+1 [ICON_Production] 生产力。集体农庄为相邻区域提供标准相邻加成。[NEWLINE]此城市的工业区建筑额外提供等同于其 [ICON_Production] 生产力的 [ICON_Food] 食物和1 [ICON_Housing] 住房。</Text>
+      <Text>苏联特色区域，替代“工业区”。[NEWLINE]与“工业区”解锁科技相同，且建造花费更低。[NEWLINE]提供1 [ICON_Housing] 住房。公民收益（区域内的每位公民）：+1 [ICON_Food] 食物，+1 [ICON_Production] 生产力。[NEWLINE][ICON_Production] 生产力相邻加成也能提供 [ICON_Food] 食物。每与一个矿山相邻获得+1 [ICON_Production] 生产力。每与一个战略资源相邻获得+2 [ICON_Production] 生产力。[NEWLINE]每与一个区域相邻获得+1 [ICON_Production] 生产力。[NEWLINE]此城市的工业区建筑额外提供等同于其 [ICON_Production] 生产力的 [ICON_Food] 食物。</Text>
     </Row>
     <!-- Units -->
     <Row Tag="LOC_UNIT_YKKZ000_RED_ARMY_NAME" Language="zh_Hans_CN">

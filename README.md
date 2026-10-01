@@ -14,13 +14,13 @@ Supported languages: English, 简体中文.
 
 ### Civilization: Soviet Union
 
-- **From Each According to His Ability, to Each According To His Work**: every city gains 0.5 Production per Citizen, plus +5% Production per Citizen; may not build Holy Site districts, gain Great Prophets, or found Religions.
-- **Kolkhoz** (unique district, replaces the Industrial Zone): available at Mining instead of Apprenticeship, and cheaper to build; provides 1 Housing; Citizen Yields of +1 Food and +1 Production; the Production adjacency bonus also provides Food; +1 Production from an adjacent Mine and +2 Production from an adjacent strategic resource; +1 Production for each adjacent district and provides a standard adjacency bonus to adjacent districts; Industrial Zone buildings in this city also provide Food equal to their Production and 1 Housing.
+- **From Each According to His Ability, to Each According To His Work**: every city gains +5% Production per Citizen; Campuses, Commercial Hubs, and Theater Squares adjacent to a Kolkhoz gain Production equal to their adjacency bonus; may not build Holy Site districts, gain Great Prophets, or found Religions.
+- **Kolkhoz** (unique district, replaces the Industrial Zone): unlocked by the same technology as the Industrial Zone, and cheaper to build; provides 1 Housing; Citizen Yields of +1 Food and +1 Production; the Production adjacency bonus also provides Food; +1 Production from an adjacent Mine and +2 Production from an adjacent strategic resource; +1 Production for each adjacent district; Industrial Zone buildings in this city also provide Food equal to their Production.
 - **Red Army** (unique unit, replaces Infantry, Modern era): costs no resource; +3 Combat Strength when fighting in home territory; +1 Combat Strength for every adjacent Red Army.
 
 ### Leader: Vladimir Lenin
 
-- **Decree on Peace**: cannot declare Surprise Wars, cannot declare war on a city-state, and cannot use the Holy War, Colonial War, or Territorial Expansion War casus belli; +50% Influence Points; +100% Diplomatic Favor from Suzerain city-states; all cities gain +5% Production and Food for each city-state you are Suzerain of.
+- **Decree on Peace**: cannot declare Surprise Wars, cannot declare war on a city-state, and cannot use the Holy War, Colonial War, or Territorial Expansion War casus belli; +50% Influence Points; all cities gain +5% Production for each city-state you are Suzerain of.
 - **Agenda: International** — likes civilizations that are at peace and hates civilizations that are at war.
 
 ### Leader: Joseph Stalin

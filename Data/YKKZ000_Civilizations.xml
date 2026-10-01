@@ -35,40 +35,59 @@
     <Row GreatPersonClassType="GREAT_PERSON_CLASS_PROPHET" TraitType="TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK" />
   </ExcludedGreatPersonClasses>
   <TraitModifiers>
-    <Row TraitType="TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK" ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_PER_POPULATION" />
     <Row TraitType="TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK" ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_MODIFIER_PER_POPULATION" />
+    <Row TraitType="TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK" ModifierId="YKKZ000_KOLKHOZ_ADJACENT_CAMPUS_PRODUCTION" />
+    <Row TraitType="TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK" ModifierId="YKKZ000_KOLKHOZ_ADJACENT_COMMERCIAL_HUB_PRODUCTION" />
+    <Row TraitType="TRAIT_CIVILIZATION_YKKZ000_FROM_ABILITY_TO_WORK" ModifierId="YKKZ000_KOLKHOZ_ADJACENT_THEATER_PRODUCTION" />
   </TraitModifiers>
   <Modifiers>
-    <!-- Statically bound via TraitModifiers: +0.5 Production per citizen (built-in effect,
-         a flat amount per citizen). -->
-    <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_PER_POPULATION" ModifierType="MODIFIER_PLAYER_CITIES_ADJUST_CITY_YIELD_PER_POPULATION" />
     <!-- Statically bound via TraitModifiers: +5% Production per citizen, resolved by the custom
          EFFECT_YKKZ000_ADJUST_CITY_YIELD_PER_POPULATION_MODIFIER. Apply/Remove only aggregate the
          per-citizen percent; the engine multiplies it by the current population when it reads city
          yields (no population hook, no per-city applied total). -->
     <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_MODIFIER_PER_POPULATION" ModifierType="MODIFIER_YKKZ000_PLAYER_CITIES_ADJUST_CITY_YIELD_MODIFIER_PER_POPULATION"
       SubjectRequirementSetId="REQUIRESETS_YKKZ000_PLAYER_IS_SOVIET_UNION" />
+    <!-- Statically bound via TraitModifiers: Campuses, Commercial Hubs, and Theater Squares
+         adjacent to a Kolkhoz mirror their own adjacency bonus as Production. -->
+    <Row ModifierId="YKKZ000_KOLKHOZ_ADJACENT_CAMPUS_PRODUCTION" ModifierType="MODIFIER_PLAYER_DISTRICTS_ADJUST_YIELD_BASED_ON_ADJACENCY_BONUS" SubjectRequirementSetId="REQUIRESETS_YKKZ000_KOLKHOZ_ADJACENT_CAMPUS" />
+    <Row ModifierId="YKKZ000_KOLKHOZ_ADJACENT_COMMERCIAL_HUB_PRODUCTION" ModifierType="MODIFIER_PLAYER_DISTRICTS_ADJUST_YIELD_BASED_ON_ADJACENCY_BONUS" SubjectRequirementSetId="REQUIRESETS_YKKZ000_KOLKHOZ_ADJACENT_COMMERCIAL_HUB" />
+    <Row ModifierId="YKKZ000_KOLKHOZ_ADJACENT_THEATER_PRODUCTION" ModifierType="MODIFIER_PLAYER_DISTRICTS_ADJUST_YIELD_BASED_ON_ADJACENCY_BONUS" SubjectRequirementSetId="REQUIRESETS_YKKZ000_KOLKHOZ_ADJACENT_THEATER" />
   </Modifiers>
   <ModifierArguments>
-    <!-- Arguments of the statically bound +0.5 Production per citizen modifier -->
-    <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_PER_POPULATION" Name="YieldType" Value="YIELD_PRODUCTION" />
-    <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_PER_POPULATION" Name="Amount" Value="0.5" />
     <!-- Arguments of the custom modifier: Amount is a percent per citizen (5 => +5% per citizen,
          multiplied by the current population when the engine reads city yields). -->
     <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_MODIFIER_PER_POPULATION" Name="YieldType" Value="YIELD_PRODUCTION" />
     <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_MODIFIER_PER_POPULATION" Name="Amount" Value="5" />
+    <!-- Arguments of the adjacency mirror modifiers -->
+    <Row ModifierId="YKKZ000_KOLKHOZ_ADJACENT_CAMPUS_PRODUCTION" Name="YieldTypeToMirror" Value="YIELD_SCIENCE" />
+    <Row ModifierId="YKKZ000_KOLKHOZ_ADJACENT_CAMPUS_PRODUCTION" Name="YieldTypeToGrant" Value="YIELD_PRODUCTION" />
+    <Row ModifierId="YKKZ000_KOLKHOZ_ADJACENT_COMMERCIAL_HUB_PRODUCTION" Name="YieldTypeToMirror" Value="YIELD_GOLD" />
+    <Row ModifierId="YKKZ000_KOLKHOZ_ADJACENT_COMMERCIAL_HUB_PRODUCTION" Name="YieldTypeToGrant" Value="YIELD_PRODUCTION" />
+    <Row ModifierId="YKKZ000_KOLKHOZ_ADJACENT_THEATER_PRODUCTION" Name="YieldTypeToMirror" Value="YIELD_CULTURE" />
+    <Row ModifierId="YKKZ000_KOLKHOZ_ADJACENT_THEATER_PRODUCTION" Name="YieldTypeToGrant" Value="YIELD_PRODUCTION" />
   </ModifierArguments>
   <RequirementSets>
     <Row RequirementSetId="REQUIRESETS_YKKZ000_PLAYER_IS_SOVIET_UNION" RequirementSetType="REQUIREMENTSET_TEST_ALL" />
+    <Row RequirementSetId="REQUIRESETS_YKKZ000_KOLKHOZ_ADJACENT_CAMPUS" RequirementSetType="REQUIREMENTSET_TEST_ALL" />
+    <Row RequirementSetId="REQUIRESETS_YKKZ000_KOLKHOZ_ADJACENT_COMMERCIAL_HUB" RequirementSetType="REQUIREMENTSET_TEST_ALL" />
+    <Row RequirementSetId="REQUIRESETS_YKKZ000_KOLKHOZ_ADJACENT_THEATER" RequirementSetType="REQUIREMENTSET_TEST_ALL" />
   </RequirementSets>
   <RequirementSetRequirements>
     <Row RequirementSetId="REQUIRESETS_YKKZ000_PLAYER_IS_SOVIET_UNION" RequirementId="REQUIRES_YKKZ000_PLAYER_IS_SOVIET_UNION" />
+    <Row RequirementSetId="REQUIRESETS_YKKZ000_KOLKHOZ_ADJACENT_CAMPUS" RequirementId="REQUIRES_DISTRICT_IS_CAMPUS" />
+    <Row RequirementSetId="REQUIRESETS_YKKZ000_KOLKHOZ_ADJACENT_CAMPUS" RequirementId="REQUIRES_YKKZ000_DISTRICT_ADJACENT_TO_KOLKHOZ" />
+    <Row RequirementSetId="REQUIRESETS_YKKZ000_KOLKHOZ_ADJACENT_COMMERCIAL_HUB" RequirementId="REQUIRES_DISTRICT_IS_COMMERCIAL_HUB" />
+    <Row RequirementSetId="REQUIRESETS_YKKZ000_KOLKHOZ_ADJACENT_COMMERCIAL_HUB" RequirementId="REQUIRES_YKKZ000_DISTRICT_ADJACENT_TO_KOLKHOZ" />
+    <Row RequirementSetId="REQUIRESETS_YKKZ000_KOLKHOZ_ADJACENT_THEATER" RequirementId="REQUIRES_DISTRICT_IS_THEATER" />
+    <Row RequirementSetId="REQUIRESETS_YKKZ000_KOLKHOZ_ADJACENT_THEATER" RequirementId="REQUIRES_YKKZ000_DISTRICT_ADJACENT_TO_KOLKHOZ" />
   </RequirementSetRequirements>
   <Requirements>
     <Row RequirementId="REQUIRES_YKKZ000_PLAYER_IS_SOVIET_UNION" RequirementType="REQUIREMENT_PLAYER_TYPE_MATCHES" Inverse="0" />
+    <Row RequirementId="REQUIRES_YKKZ000_DISTRICT_ADJACENT_TO_KOLKHOZ" RequirementType="REQUIREMENT_PLOT_ADJACENT_DISTRICT_TYPE_MATCHES" Inverse="0" />
   </Requirements>
   <RequirementArguments>
     <Row RequirementId="REQUIRES_YKKZ000_PLAYER_IS_SOVIET_UNION" Name="CivilizationType" Value="CIVILIZATION_YKKZ000_SOVIET_UNION" />
+    <Row RequirementId="REQUIRES_YKKZ000_DISTRICT_ADJACENT_TO_KOLKHOZ" Name="DistrictType" Value="DISTRICT_YKKZ000_KOLKHOZ" />
   </RequirementArguments>
   <CityNames>
     <Row CivilizationType="CIVILIZATION_YKKZ000_SOVIET_UNION" CityName="LOC_CITY_NAME_YKKZ000_SOVIET_UNION_2" />

@@ -11,21 +11,6 @@
     <Row Tag="LOC_DISTRICT_YKKZ000_STRATEGIC_PRODUCTION" Language="zh_Hans_CN">
       <Text>+{1_num} [ICON_Production] 生产力来自相邻相邻战略资源。</Text>
     </Row>
-    <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_SCIENCE" Language="zh_Hans_CN">
-      <Text>+{1_num} [ICON_Science] 科技值来自相邻集体农庄。</Text>
-    </Row>
-    <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_CULTURE" Language="zh_Hans_CN">
-      <Text>+{1_num} [ICON_Culture] 文化值来自相邻集体农庄。</Text>
-    </Row>
-    <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_FAITH" Language="zh_Hans_CN">
-      <Text>+{1_num} [ICON_Faith] 信仰值来自相邻集体农庄。</Text>
-    </Row>
-    <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_GOLD" Language="zh_Hans_CN">
-      <Text>+{1_num} [ICON_Gold] 金币来自相邻集体农庄。</Text>
-    </Row>
-    <Row Tag="LOC_DISTRICT_YKKZ000_KOLKHOZ_PRODUCTION" Language="zh_Hans_CN">
-      <Text>+{1_num} [ICON_Production] 生产力来自相邻集体农庄。</Text>
-    </Row>
     <!-- Unit Abilities-->
     <Row Tag="LOC_ABILITY_YKKZ000_RED_ARMY_DEFENSE_OF_MOSCOW_NAME" Language="zh_Hans_CN">
       <Text>保卫莫斯科</Text>
