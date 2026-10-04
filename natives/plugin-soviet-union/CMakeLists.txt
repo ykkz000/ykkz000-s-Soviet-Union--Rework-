@@ -2,7 +2,6 @@ project(YKKZ000SovietUnionPlugin LANGUAGES CXX)
 
 add_library(YKKZ000SovietUnionPlugin SHARED
   src/plugin.cpp
-  src/core/effect_modules.cpp
   src/core/engine_access.cpp
   src/gameplay/city_yield_common.cpp
   src/persistence/extra_persistence.cpp

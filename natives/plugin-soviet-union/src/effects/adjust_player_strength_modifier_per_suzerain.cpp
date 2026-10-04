@@ -1,4 +1,4 @@
-#include <ykkz000/plugin/adjust_player_strength_modifier_per_suzerain.h>
+#include <ykkz000/plugin/effects.h>
 
 #include <atomic>
 #include <cstddef>
@@ -493,11 +493,10 @@ const bridge::EffectDesc* Describe(const bridge::Host& host) {
   return &g_desc;
 }
 
-const EffectModule g_module = {"player-strength-per-suzerain", &Describe, &OnContext,
-                               &Shutdown};
+const Effect g_effect = {"player-strength-per-suzerain", &Describe, &OnContext, &Shutdown};
 
 } // namespace
 
-const EffectModule* StrengthModule() { return &g_module; }
+const Effect* GetAdjustPlayerStrengthModifierPerSuzerainEffect() { return &g_effect; }
 
 } // namespace ykkz000::plugin

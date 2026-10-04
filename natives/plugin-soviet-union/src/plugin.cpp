@@ -1,7 +1,7 @@
 #include <ykkz000/bridge/host.h>
 #include <ykkz000/export.h>
 
-#include <ykkz000/plugin/effect_modules.h>
+#include <ykkz000/plugin/effects.h>
 #include <ykkz000/plugin/engine_access.h>
 #include <ykkz000/plugin/extra_persistence.h>
 
@@ -17,9 +17,9 @@ void OnGameContext(ykkz000::bridge::GameContextEvent event, void* context) {
     // context; the effect modules then mirror/hydrate their side tables through them.
     (void)ykkz000::plugin::EnsurePersistenceHooks();
   }
-  for (const ykkz000::plugin::EffectModule* module : ykkz000::plugin::AllEffectModules()) {
-    if (module->on_context != nullptr) {
-      module->on_context(event, context);
+  for (const ykkz000::plugin::Effect* effect : ykkz000::plugin::GetAllEffects()) {
+    if (effect->on_context != nullptr) {
+      effect->on_context(event, context);
     }
   }
   if (event == ykkz000::bridge::GameContextEvent::kDestroyed) {
@@ -28,8 +28,8 @@ void OnGameContext(ykkz000::bridge::GameContextEvent event, void* context) {
 }
 
 int RegisterAll(ykkz000::bridge::Host* host) {
-  for (const ykkz000::plugin::EffectModule* module : ykkz000::plugin::AllEffectModules()) {
-    const ykkz000::bridge::EffectDesc* desc = module->describe(*host);
+  for (const ykkz000::plugin::Effect* effect : ykkz000::plugin::GetAllEffects()) {
+    const ykkz000::bridge::EffectDesc* desc = effect->describe(*host);
     if (desc == nullptr) {
       return -1;
     }
@@ -56,9 +56,9 @@ YKKZ000_PLUGIN_API int GetPlugin(ykkz000::bridge::Host* host) {
 }
 
 YKKZ000_PLUGIN_API void DestroyPlugin() {
-  for (const ykkz000::plugin::EffectModule* module : ykkz000::plugin::AllEffectModules()) {
-    if (module->shutdown != nullptr) {
-      module->shutdown();
+  for (const ykkz000::plugin::Effect* effect : ykkz000::plugin::GetAllEffects()) {
+    if (effect->shutdown != nullptr) {
+      effect->shutdown();
     }
   }
   ykkz000::plugin::ResetPersistenceForUnload();

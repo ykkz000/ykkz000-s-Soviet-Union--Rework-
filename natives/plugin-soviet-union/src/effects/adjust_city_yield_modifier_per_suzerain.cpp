@@ -1,4 +1,4 @@
-#include <ykkz000/plugin/adjust_city_yield_modifier_per_suzerain.h>
+#include <ykkz000/plugin/effects.h>
 
 #include <cstdint>
 #include <limits>
@@ -136,10 +136,10 @@ const bridge::EffectDesc* Describe(const bridge::Host& host) {
   return &g_desc;
 }
 
-const EffectModule g_module = {"city-yield-per-suzerain", &Describe, nullptr, nullptr};
+const Effect g_effect = {"city-yield-per-suzerain", &Describe, nullptr, nullptr};
 
 } // namespace
 
-const EffectModule* CityYieldPerSuzerainModule() { return &g_module; }
+const Effect* GetAdjustCityYieldModifierPerSuzerainEffect() { return &g_effect; }
 
 } // namespace ykkz000::plugin

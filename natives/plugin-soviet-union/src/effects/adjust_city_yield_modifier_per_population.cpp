@@ -1,4 +1,4 @@
-#include <ykkz000/plugin/adjust_city_yield_modifier_per_population.h>
+#include <ykkz000/plugin/effects.h>
 
 #include <atomic>
 #include <cstddef>
@@ -441,10 +441,10 @@ const bridge::EffectDesc* Describe(const bridge::Host& host) {
   return &g_desc;
 }
 
-const EffectModule g_module = {"city-yield-per-population", &Describe, &OnContext, &Shutdown};
+const Effect g_effect = {"city-yield-per-population", &Describe, &OnContext, &Shutdown};
 
 } // namespace
 
-const EffectModule* CityYieldModule() { return &g_module; }
+const Effect* GetAdjustCityYieldModifierPerPopulationEffect() { return &g_effect; }
 
 } // namespace ykkz000::plugin
