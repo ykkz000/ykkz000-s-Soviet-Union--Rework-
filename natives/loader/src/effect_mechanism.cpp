@@ -8,7 +8,7 @@
 #include <utility>
 #include <vector>
 
-#include "loader_internal.h"
+#include <ykkz000/loader/internal.h>
 
 // Effect "mechanism" layer: generalized custom EffectType implementation registration + factory
 // Create wrapping + effect-object vtable slot replacement and ownership registration.

@@ -2,19 +2,21 @@ project(YKKZ000SovietUnionPlugin LANGUAGES CXX)
 
 add_library(YKKZ000SovietUnionPlugin SHARED
   src/plugin.cpp
-  src/effects/effect_modules.cpp
-  src/effects/engine_access.cpp
-  src/effects/city_yield_common.cpp
-  src/effects/extra_persistence.cpp
-  src/effects/adjust_city_yield_per_population_modifier.cpp
+  src/core/effect_modules.cpp
+  src/core/engine_access.cpp
+  src/gameplay/city_yield_common.cpp
+  src/persistence/extra_persistence.cpp
+  src/effects/adjust_city_yield_modifier_per_population.cpp
   src/effects/adjust_city_yield_modifier_per_suzerain.cpp
-  src/effects/adjust_player_strength_per_suzerain_modifier.cpp
+  src/effects/adjust_player_strength_modifier_per_suzerain.cpp
   resource.rc
   plugin.def)
 
 set_target_properties(YKKZ000SovietUnionPlugin PROPERTIES
   OUTPUT_NAME "Plugin_YKKZ000_Soviet_Union"
   PREFIX "")
+
+target_include_directories(YKKZ000SovietUnionPlugin PRIVATE include)
 
 target_link_libraries(YKKZ000SovietUnionPlugin PRIVATE ykkz000_bridge)
 

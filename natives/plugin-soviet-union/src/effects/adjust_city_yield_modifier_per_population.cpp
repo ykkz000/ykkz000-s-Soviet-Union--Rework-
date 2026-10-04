@@ -1,4 +1,4 @@
-#include "adjust_city_yield_per_population_modifier.h"
+#include <ykkz000/plugin/adjust_city_yield_modifier_per_population.h>
 
 #include <atomic>
 #include <cstddef>
@@ -14,9 +14,9 @@
 #include <ykkz000/civ6/tracked_value.h>
 #include <ykkz000/extra/player_extra.h>
 
-#include "city_yield_common.h"
-#include "engine_access.h"
-#include "extra_persistence.h"
+#include <ykkz000/plugin/city_yield_common.h>
+#include <ykkz000/plugin/engine_access.h>
+#include <ykkz000/plugin/extra_persistence.h>
 
 // Injection host for city-yield modifiers: append two "multiply at read time" modifiers on the
 // engine's yield read path City::Instance::CalculateYield --
@@ -419,7 +419,7 @@ const bridge::EffectDesc* Describe(const bridge::Host& host) {
   if (g_described) {
     return &g_desc;
   }
-  g_desc.typeName = "EFFECT_YKKZ000_ADJUST_CITY_YIELD_PER_POPULATION_MODIFIER";
+  g_desc.typeName = "EFFECT_YKKZ000_ADJUST_CITY_YIELD_MODIFIER_PER_POPULATION";
   g_desc.templateEffect = "EFFECT_ADJUST_CITY_YIELD_MODIFIER";
 #if !defined(DISABLE_CUSTOM_BEHAVIOR)
   const bridge::EngineApi* engine = host.engine;

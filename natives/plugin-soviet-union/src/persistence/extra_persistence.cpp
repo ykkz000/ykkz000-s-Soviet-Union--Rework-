@@ -1,4 +1,4 @@
-#include "extra_persistence.h"
+#include <ykkz000/plugin/extra_persistence.h>
 
 #include <atomic>
 #include <cstddef>
@@ -12,7 +12,7 @@
 #include <ykkz000/bridge/host.h>
 #include <ykkz000/civ6/common.h>
 
-#include "engine_access.h"
+#include <ykkz000/plugin/engine_access.h>
 
 // Custom FAutoVariable persistence for city-yield values.
 //

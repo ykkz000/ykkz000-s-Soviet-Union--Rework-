@@ -10,7 +10,7 @@
 
 #include <ykkz000/bridge/hash.h>
 
-#include "loader_internal.h"
+#include <ykkz000/loader/internal.h>
 
 namespace ykkz000::loader {
 namespace {

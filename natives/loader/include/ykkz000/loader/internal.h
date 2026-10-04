@@ -15,7 +15,7 @@
 #include <ykkz000/civ6/factory.h>
 #include <ykkz000/civ6/handler.h>
 
-/// @file loader_internal.h
+/// @file internal.h
 /// @brief Loader-internal shared declarations: engine entry-point resolution, hook service,
 ///        memory probing, effect mechanism, and plugin management.
 /// @note For use only by the Loader's own .cpp files (not a plugin ABI).

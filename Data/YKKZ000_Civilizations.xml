@@ -11,7 +11,7 @@
     <Row Type="MODIFIER_YKKZ000_PLAYER_CITIES_ADJUST_CITY_YIELD_MODIFIER_PER_POPULATION" Kind="KIND_MODIFIER" />
   </Types>
   <DynamicModifiers>
-    <Row ModifierType="MODIFIER_YKKZ000_PLAYER_CITIES_ADJUST_CITY_YIELD_MODIFIER_PER_POPULATION" CollectionType="COLLECTION_PLAYER_CITIES" EffectType="EFFECT_YKKZ000_ADJUST_CITY_YIELD_PER_POPULATION_MODIFIER" />
+    <Row ModifierType="MODIFIER_YKKZ000_PLAYER_CITIES_ADJUST_CITY_YIELD_MODIFIER_PER_POPULATION" CollectionType="COLLECTION_PLAYER_CITIES" EffectType="EFFECT_YKKZ000_ADJUST_CITY_YIELD_MODIFIER_PER_POPULATION" />
   </DynamicModifiers>
   <Civilizations>
     <Row CivilizationType="CIVILIZATION_YKKZ000_SOVIET_UNION" Name="LOC_CIVILIZATION_YKKZ000_SOVIET_UNION_NAME" Description="LOC_CIVILIZATION_YKKZ000_SOVIET_UNION_DESCRIPTION" Adjective="LOC_CIVILIZATION_YKKZ000_SOVIET_UNION_ADJECTIVE" StartingCivilizationLevelType="CIVILIZATION_LEVEL_FULL_CIV" RandomCityNameDepth="5" Ethnicity="ETHNICITY_EURO" />
@@ -42,7 +42,7 @@
   </TraitModifiers>
   <Modifiers>
     <!-- Statically bound via TraitModifiers: +5% Production per citizen, resolved by the custom
-         EFFECT_YKKZ000_ADJUST_CITY_YIELD_PER_POPULATION_MODIFIER. Apply/Remove only aggregate the
+         EFFECT_YKKZ000_ADJUST_CITY_YIELD_MODIFIER_PER_POPULATION. Apply/Remove only aggregate the
          per-citizen percent; the engine multiplies it by the current population when it reads city
          yields (no population hook, no per-city applied total). -->
     <Row ModifierId="TRAIT_YKKZ000_FROM_ABILITY_TO_WORK_ADJUST_PRODUCTION_MODIFIER_PER_POPULATION" ModifierType="MODIFIER_YKKZ000_PLAYER_CITIES_ADJUST_CITY_YIELD_MODIFIER_PER_POPULATION"

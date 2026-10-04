@@ -1,8 +1,8 @@
-#include "effect_modules.h"
+#include <ykkz000/plugin/effect_modules.h>
 
-#include "adjust_city_yield_modifier_per_suzerain.h"
-#include "adjust_city_yield_per_population_modifier.h"
-#include "adjust_player_strength_per_suzerain_modifier.h"
+#include <ykkz000/plugin/adjust_city_yield_modifier_per_population.h>
+#include <ykkz000/plugin/adjust_city_yield_modifier_per_suzerain.h>
+#include <ykkz000/plugin/adjust_player_strength_modifier_per_suzerain.h>
 
 namespace ykkz000::plugin {
 namespace {

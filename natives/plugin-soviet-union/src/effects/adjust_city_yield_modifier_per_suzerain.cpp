@@ -1,4 +1,4 @@
-#include "adjust_city_yield_modifier_per_suzerain.h"
+#include <ykkz000/plugin/adjust_city_yield_modifier_per_suzerain.h>
 
 #include <cstdint>
 #include <limits>
@@ -8,22 +8,22 @@
 #include <ykkz000/civ6/effect.h>
 #include <ykkz000/extra/player_extra.h>
 
-#include "city_yield_common.h"
-#include "engine_access.h"
-#include "extra_persistence.h"
+#include <ykkz000/plugin/city_yield_common.h>
+#include <ykkz000/plugin/engine_access.h>
+#include <ykkz000/plugin/extra_persistence.h>
 
 // City-yield modifier of "per suzerain city x Amount%" (multiply by suzerain count at read time).
 //
 // Shares the same side table (CityExtra) and the same injection point as
-// adjust_city_yield_per_population_modifier: Apply/Remove only aggregate the per-suzerain percentage into
+// adjust_city_yield_modifier_per_population: Apply/Remove only aggregate the per-suzerain percentage into
 // per_suzerain_percent[] (FixedPoint<16>, 0x10000 == +1%/suzerain); the actual
 // (value x current suzerain count) >> 8 conversion happens inside the CalculateYield hook owned by
-// the adjust_city_yield_per_population_modifier module, so suzerain changes are followed naturally by the
+// the adjust_city_yield_modifier_per_population module, so suzerain changes are followed naturally by the
 // next read and no bookkeeping is needed here.
 //
 // This module installs no hook (prepare = null): the CalculateYield MinHook is owned exclusively by
 // the existing module (the same target must not be hooked twice); side-table cleanup is handled
-// centrally by context events (see adjust_city_yield_per_population_modifier). If the existing module is
+// centrally by context events (see adjust_city_yield_modifier_per_population). If the existing module is
 // disabled by DISABLE_CUSTOM_BEHAVIOR, this effect is not injected either (it depends on
 // the host).
 namespace ykkz000::plugin {

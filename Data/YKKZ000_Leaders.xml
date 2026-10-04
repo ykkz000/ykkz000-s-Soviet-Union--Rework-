@@ -15,10 +15,10 @@
   </Types>
   <DynamicModifiers>
     <!-- 每宗主城邦 × Amount 的战斗力修正，由 Loader 的
-         EFFECT_YKKZ000_ADJUST_PLAYER_STRENGTH_PER_SUZERAIN_MODIFIER 解析。
+         EFFECT_YKKZ000_ADJUST_PLAYER_STRENGTH_MODIFIER_PER_SUZERAIN 解析。
          CollectionType 与内置 MODIFIER_PLAYER_UNITS_ADJUST_COMBAT_STRENGTH 一致：COLLECTION_PLAYER_COMBAT。
          subject 需求为“任意单位”恒真集——使引擎把该修饰器当作逐单位目标进行应用。 -->
-    <Row ModifierType="MODIFIER_YKKZ000_PLAYER_UNITS_ADJUST_COMBAT_STRENGTH_PER_SUZERAIN" CollectionType="COLLECTION_PLAYER_COMBAT" EffectType="EFFECT_YKKZ000_ADJUST_PLAYER_STRENGTH_PER_SUZERAIN_MODIFIER" />
+    <Row ModifierType="MODIFIER_YKKZ000_PLAYER_UNITS_ADJUST_COMBAT_STRENGTH_PER_SUZERAIN" CollectionType="COLLECTION_PLAYER_COMBAT" EffectType="EFFECT_YKKZ000_ADJUST_PLAYER_STRENGTH_MODIFIER_PER_SUZERAIN" />
     <!-- 每宗主城邦 × Amount% 的城市产出修正，由 Loader 的
          EFFECT_YKKZ000_ADJUST_CITY_YIELD_MODIFIER_PER_SUZERAIN 解析（逐城市主体）。
          CollectionType 与内置 MODIFIER_PLAYER_CITIES_ADJUST_CITY_YIELD_MODIFIER_PER_POPULATION /
@@ -148,7 +148,7 @@
     <Row ModifierId="TRAIT_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_ADJUST_COMBAT_STRENGTH_MELEE" ModifierType="MODIFIER_PLAYER_UNITS_ADJUST_COMBAT_STRENGTH" SubjectRequirementSetId="REQUIRESETS_YKKZ000_UNIT_IS_MELEE" />
     <Row ModifierId="TRAIT_YKKZ000_GRAND_DEPTH_OPERATIONAL_THEORY_ADJUST_MOVEMENT_MELEE" ModifierType="MODIFIER_PLAYER_UNITS_ADJUST_MOVEMENT" SubjectRequirementSetId="REQUIRESETS_YKKZ000_UNIT_IS_MELEE" />
     <!-- Per suzerain city-state +Amount Combat Strength: bound directly to the Stalin
-         leader trait. The DLL (EFFECT_YKKZ000_ADJUST_PLAYER_STRENGTH_PER_SUZERAIN_MODIFIER)
+         leader trait. The DLL (EFFECT_YKKZ000_ADJUST_PLAYER_STRENGTH_MODIFIER_PER_SUZERAIN)
          scales Amount by the owner's suzerain count, so the template's StackPercent (+0x44),
          Scalar (+0x48) and the other scaling branches do not participate and need no
          data-side arguments. The always-true subject set keeps the engine applying it per

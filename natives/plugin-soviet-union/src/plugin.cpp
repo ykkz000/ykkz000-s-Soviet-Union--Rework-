@@ -1,9 +1,9 @@
 #include <ykkz000/bridge/host.h>
 #include <ykkz000/export.h>
 
-#include "effects/effect_modules.h"
-#include "effects/engine_access.h"
-#include "effects/extra_persistence.h"
+#include <ykkz000/plugin/effect_modules.h>
+#include <ykkz000/plugin/engine_access.h>
+#include <ykkz000/plugin/extra_persistence.h>
 
 // Strategy layer of the Soviet Union mod: registers the custom EffectTypes with the Loader and
 // forwards context events to each effect module.

@@ -76,6 +76,6 @@
 
 ##### EffectType 定义代码规范
 
-- 定义EffectType的代码的头文件和源文件**必须**放在plugin的源代码目录的`effects`目录中
+- 定义EffectType的代码的头文件**必须**放在plugin的`include/ykkz000/plugin`目录中，源文件**必须**放在plugin的源代码目录的`src/effects`目录中
 - 定义EffectType的代码的头文件和源文件**必须**以该EffectType的去除前两个单词的小写下划线拼写命名（允许长命名）
 - 定义EffectType的代码的头文件应当只暴露其它Plugin代码需要的部分，不要暴露内部实现

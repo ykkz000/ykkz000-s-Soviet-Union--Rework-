@@ -20,6 +20,8 @@ set_target_properties(YKKZ000Loader PROPERTIES
   OUTPUT_NAME "GameCore_YKKZ000_Loader_XP2"
   PREFIX "")
 
+target_include_directories(YKKZ000Loader PRIVATE include)
+
 target_link_libraries(YKKZ000Loader PRIVATE ykkz000_bridge minhook::minhook log4cxx user32 advapi32 shell32 ole32)
 
 if(DISABLE_EFFECT_HANDLER)

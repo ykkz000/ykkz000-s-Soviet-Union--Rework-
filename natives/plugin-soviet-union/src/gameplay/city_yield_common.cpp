@@ -1,4 +1,4 @@
-#include "city_yield_common.h"
+#include <ykkz000/plugin/city_yield_common.h>
 
 #include <array>
 #include <atomic>
@@ -10,8 +10,8 @@
 #include <ykkz000/civ6/city.h>
 #include <ykkz000/civ6/effect.h>
 
-#include "engine_access.h"
-#include "extra_persistence.h"
+#include <ykkz000/plugin/engine_access.h>
+#include <ykkz000/plugin/extra_persistence.h>
 
 namespace ykkz000::plugin {
 namespace {

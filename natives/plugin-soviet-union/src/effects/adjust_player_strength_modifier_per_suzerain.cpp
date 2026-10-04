@@ -1,4 +1,4 @@
-#include "adjust_player_strength_per_suzerain_modifier.h"
+#include <ykkz000/plugin/adjust_player_strength_modifier_per_suzerain.h>
 
 #include <atomic>
 #include <cstddef>
@@ -11,7 +11,7 @@
 #include <ykkz000/civ6/unit.h>
 #include <ykkz000/extra/player_extra.h>
 
-#include "engine_access.h"
+#include <ykkz000/plugin/engine_access.h>
 
 // Unit strength modifier of "per suzerain city x Amount".
 //
@@ -471,7 +471,7 @@ const bridge::EffectDesc* Describe(const bridge::Host& host) {
   if (g_described) {
     return &g_desc;
   }
-  g_desc.typeName = "EFFECT_YKKZ000_ADJUST_PLAYER_STRENGTH_PER_SUZERAIN_MODIFIER";
+  g_desc.typeName = "EFFECT_YKKZ000_ADJUST_PLAYER_STRENGTH_MODIFIER_PER_SUZERAIN";
   g_desc.templateEffect = "EFFECT_ADJUST_PLAYER_STRENGTH_MODIFIER";
 #if !defined(DISABLE_CUSTOM_BEHAVIOR) && !defined(DISABLE_STRENGTH_PER_SUZERAIN)
   const bridge::EngineApi* engine = host.engine;

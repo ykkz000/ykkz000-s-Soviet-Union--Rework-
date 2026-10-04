@@ -2,7 +2,7 @@
 
 #include <cstdio>
 
-#include "loader_internal.h"
+#include <ykkz000/loader/internal.h>
 
 namespace ykkz000::loader {
 

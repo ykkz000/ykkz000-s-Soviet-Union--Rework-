@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include "loader_internal.h"
+#include <ykkz000/loader/internal.h>
 
 // Effect handler registration.
 //

@@ -15,7 +15,7 @@
 #include <log4cxx/nt/outputdebugstringappender.h>
 #include <log4cxx/patternlayout.h>
 
-#include "loader_internal.h"
+#include <ykkz000/loader/internal.h>
 
 // Logging backend: log4cxx owns the file appender (append + immediate flush) and the Windows
 // debugger appender. The layout and level mapping reproduce the previous self-implemented writer:

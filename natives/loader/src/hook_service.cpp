@@ -8,7 +8,7 @@
 
 #include <MinHook.h>
 
-#include "loader_internal.h"
+#include <ykkz000/loader/internal.h>
 
 // The process-wide single MinHook facade (hook service).
 //

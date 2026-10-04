@@ -2,11 +2,11 @@
 
 #include <ykkz000/bridge/host.h>
 
-#include "effect_module.h"
+#include <ykkz000/plugin/effect_module.h>
 
-/// @file adjust_player_strength_per_suzerain_modifier.h
+/// @file adjust_player_strength_modifier_per_suzerain.h
 /// @brief Effect module for the "player unit strength per suzerain" modifier, backed by
-///   EffectType EFFECT_YKKZ000_ADJUST_PLAYER_STRENGTH_PER_SUZERAIN_MODIFIER.
+///   EffectType EFFECT_YKKZ000_ADJUST_PLAYER_STRENGTH_MODIFIER_PER_SUZERAIN.
 /// @note Apply/Remove replace slots with the shared 4-pointer bridge::ApplyFn signature (identical
 ///       to the real signature of the strength template).
 namespace ykkz000::plugin {

@@ -10,7 +10,7 @@
 #include <cstring>
 #include <cwchar>
 
-#include "loader_internal.h"
+#include <ykkz000/loader/internal.h>
 
 // -- Crash-context capture (VEH) --
 // Requirements: no heap dependency, no debugger dependency; only append to a small file.

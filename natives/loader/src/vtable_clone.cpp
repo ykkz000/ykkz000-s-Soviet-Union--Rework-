@@ -7,7 +7,7 @@
 #include <string>
 #include <unordered_map>
 
-#include "loader_internal.h"
+#include <ykkz000/loader/internal.h>
 
 namespace ykkz000::loader {
 namespace {
