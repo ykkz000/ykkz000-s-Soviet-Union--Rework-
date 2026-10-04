@@ -12,7 +12,6 @@
 #include <ykkz000/extra/player_extra.h>
 
 #include "engine_access.h"
-#include "extra_persistence.h"
 
 // Unit strength modifier of "per suzerain city x Amount".
 //
@@ -85,11 +84,11 @@ std::int32_t UnitIdOf(const void* unit) {
   return unit_id >= 0 ? unit_id : -1;
 }
 
-// Recompute the aggregate = baseline (restored after a load) + sum over instances. Must be called
-// after an upsert/erase so that strength_per_suzerain stays in sync with instances; if the aggregate
-// exceeds the defensive bound, warn once (to catch re-inflation).
+// Recompute the aggregate = sum over instances. Must be called after an upsert/erase so that
+// strength_per_suzerain stays in sync with instances; if the aggregate exceeds the defensive bound,
+// warn once (to catch re-inflation).
 void RecomputeStrength(extra::UnitExtra& unit) {
-  std::int32_t sum = unit.baseline;
+  std::int32_t sum = 0;
   for (const auto& entry : unit.instances) {
     sum += entry.second;
   }
@@ -100,47 +99,6 @@ void RecomputeStrength(extra::UnitExtra& unit) {
       LogWarnF("extra: strength_per_suzerain=%d exceeds cap (unit_id=%d); "
                "side table may be inflated",
                sum, unit.unit_id);
-    }
-  }
-}
-
-// Seeds the unit side-table entry from the unit's persisted AutoVariable after a load: the engine
-// does not replay Apply for modifiers that survived the load, so the restored aggregate is stored
-// as the baseline and folded back in by RecomputeStrength.
-void EnsureUnitExtraHydrated(void* unit, int player_id, std::int32_t unit_id) {
-  if (unit == nullptr || player_id < 0 || unit_id < 0) {
-    return;
-  }
-  if (extra::PlayerExtras().FindUnitStrength(player_id, unit_id) != 0) {
-    return;
-  }
-  std::int32_t restored = 0;
-  if (!LoadUnitStrength(unit, restored) || restored == 0) {
-#if defined(_DEBUG)
-    static std::atomic<long> kMissCount{0};
-    const long n = ++kMissCount;
-    if (n <= 8 || (n % 4096) == 0) {
-      LogDebugF("strength: hydrate miss unit=%p player=%d unit_id=%d restored=%d", unit,
-                player_id, unit_id, restored);
-    }
-#endif
-    return;
-  }
-  bool seeded = false;
-  extra::PlayerExtras().EditUnit(player_id, unit_id, [&](extra::UnitExtra& entry) {
-    if (entry.strength_per_suzerain != 0 || !entry.instances.empty()) {
-      return;
-    }
-    entry.baseline = restored;
-    entry.strength_per_suzerain = restored;
-    seeded = true;
-  });
-  if (seeded) {
-    static std::atomic<long> kSeedCount{0};
-    const long n = ++kSeedCount;
-    if (n <= 8 || (n % 4096) == 0) {
-      LogInfoF("strength: hydrated unit=%p player=%d unit_id=%d strength=%d", unit, player_id,
-               unit_id, restored);
     }
   }
 }
@@ -223,14 +181,8 @@ void StrengthAccumulate_Hook(civ6::GameEffects::ProposedCombat* target, int play
   // template Amount so behavior is unchanged.
   int per_suzerain = amount;
   if (kWindowUnitId >= 0) {
-    std::int32_t stored =
+    const std::int32_t stored =
         extra::PlayerExtras().FindUnitStrength(player_id, kWindowUnitId);
-    if (stored == 0 && kWindowUnit != nullptr) {
-      // After a load the side table is empty but the unit's AutoVariable holds the restored
-      // aggregate: hydrate it before falling back to the template Amount.
-      EnsureUnitExtraHydrated(kWindowUnit, player_id, kWindowUnitId);
-      stored = extra::PlayerExtras().FindUnitStrength(player_id, kWindowUnitId);
-    }
     if (stored != 0) {
       per_suzerain = stored;
       if (per_suzerain != amount) { // Normal case of multi-instance aggregation
@@ -352,7 +304,6 @@ std::uint64_t ApplyPerSuzerain(void* self, void* a1, void* a2, void* a3, int sig
   const int delta = kScaledDelta;
   const int window_player = kWindowPlayerId;
   const std::int32_t window_unit_id = kWindowUnitId;
-  void* const window_unit = kWindowUnit;
   CloseWindow(previous);
 
   if (writes == 0) {
@@ -372,23 +323,11 @@ std::uint64_t ApplyPerSuzerain(void* self, void* a1, void* a2, void* a3, int sig
   if (window_unit_id >= 0) {
     std::int32_t amount = 0;
     if (TryRead(self, &civ6::AdjustPlayerStrengthModifier::amount, amount)) {
-      // Seed from the restored AutoVariable aggregate before touching this unit's entry (no-op if
-      // the hook already hydrated it).
-      EnsureUnitExtraHydrated(window_unit, window_player, window_unit_id);
       if (sign < 0) {
         extra::PlayerExtras().EditUnit(window_player, window_unit_id,
                                        [&](extra::UnitExtra& unit) {
                                          unit.instances.erase(self);
-                                         if (unit.instances.empty() &&
-                                             unit.baseline != 0) {
-                                           // The restored modifier's Remove arrived without a
-                                           // matching Apply (see EnsureUnitExtraHydrated): drop the
-                                           // restored aggregate.
-                                           unit.baseline = 0;
-                                         }
                                          RecomputeStrength(unit);
-                                         PersistUnitStrength(
-                                             window_unit, unit.strength_per_suzerain);
                                        });
         extra::PlayerExtras().EraseIfEmptyUnit(window_player, window_unit_id);
       } else {
@@ -396,8 +335,6 @@ std::uint64_t ApplyPerSuzerain(void* self, void* a1, void* a2, void* a3, int sig
                                        [&](extra::UnitExtra& unit) {
                                          unit.instances[self] = amount;
                                          RecomputeStrength(unit);
-                                         PersistUnitStrength(
-                                             window_unit, unit.strength_per_suzerain);
                                        });
         static std::atomic<bool> kLoggedFirstExtra{false};
         if (!kLoggedFirstExtra.exchange(true)) {
