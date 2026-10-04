@@ -16,6 +16,7 @@
 
 #include "city_yield_common.h"
 #include "engine_access.h"
+#include "extra_persistence.h"
 
 // Injection host for city-yield modifiers: append two "multiply at read time" modifiers on the
 // engine's yield read path City::Instance::CalculateYield --
@@ -109,14 +110,20 @@ void ApplyEntries(void* self, void* city, int sign) {
   }
   static std::atomic<bool> kLoggedFirstApply{false};
   if (!kLoggedFirstApply.exchange(true)) {
-    LogF(1, "city-yield: first apply self=%p city=%p owner=%d entries=%zu", self, city,
-         ref.player_id, entries.size());
+    LogInfoF("city-yield: first apply self=%p city=%p owner=%d entries=%zu", self, city,
+             ref.player_id, entries.size());
+#if defined(_DEBUG)
     for (const EffectEntry& entry : entries) {
-      LogF(2, "city-yield: entry yield=%d amount=%d", entry.yield_type, entry.amount);
+      LogDebugF("city-yield: entry yield=%d amount=%d", entry.yield_type, entry.amount);
     }
+#endif
   }
   constexpr std::int64_t kPercentMin = std::numeric_limits<std::int32_t>::min();
   constexpr std::int64_t kPercentMax = std::numeric_limits<std::int32_t>::max();
+  // After a savegame load the engine does not replay Apply, so seed this city's entry from its
+  // persisted AutoVariables before the incremental add below; otherwise the first Apply would
+  // reset the restored values.
+  EnsureCityExtraHydrated(city, ref);
   extra::PlayerExtras().EditCity(
       ref.player_id, ref.city_id, ref.player_id, [&](extra::CityExtra& extra) {
         for (const EffectEntry& entry : entries) {
@@ -141,6 +148,8 @@ void ApplyEntries(void* self, void* city, int sign) {
             extra.yield_count = entry.yield_type + 1;
           }
         }
+        // Mirror the new aggregate into the city's AutoVariables so the engine serializes it.
+        PersistCityValues(city, extra.percent.data(), extra.per_suzerain_percent.data());
       });
   // After the side table changes, invalidate the engine's city-yield cache and send a zero-delta
   // "yield changed" notification (details in city_yield_common: clear the valid flag in
@@ -161,9 +170,18 @@ std::atomic<long> kHitCount{0};
 // Hit probe: rate-limited logging of key quantities, to tell whether numbers reach the engine.
 void LogHit(const CityRef& ref, int yield, int population, int suzerains,
             std::int64_t delta, long hit) {
-  LogF(2, "city-yield: hit#%ld yield=%d pop=%d suzerains=%d player=%d city=%d delta=%lld",
-       hit, yield, population, suzerains, ref.player_id, ref.city_id,
-       static_cast<long long>(delta));
+#if defined(_DEBUG)
+  LogDebugF("city-yield: hit#%ld yield=%d pop=%d suzerains=%d player=%d city=%d delta=%lld",
+            hit, yield, population, suzerains, ref.player_id, ref.city_id,
+            static_cast<long long>(delta));
+#else
+  (void)ref;
+  (void)yield;
+  (void)population;
+  (void)suzerains;
+  (void)delta;
+  (void)hit;
+#endif
 }
 
 void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
@@ -173,7 +191,7 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
     // should not happen; if it does it must be visible.
     static std::atomic<bool> kLoggedNoTrampoline{false};
     if (!kLoggedNoTrampoline.exchange(true)) {
-      Log(0, "city-yield: detour without trampoline; call dropped");
+      LogError("city-yield: detour without trampoline; call dropped");
     }
     return out;
   }
@@ -190,15 +208,15 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
       CityExtraSnapshotGeneration() != 0) {
     static std::atomic<bool> kLoggedNeverHit{false};
     if (!kLoggedNeverHit.exchange(true)) {
-      Log(0, "city-yield: CalculateYield hook fired but never applied (8192 calls); "
-             "side table or key may be wrong");
+      LogWarn("city-yield: CalculateYield hook fired but never applied (8192 calls); "
+              "side table or key may be wrong");
     }
   }
   CityRef ref;
   if (!CityRefOf(city, ref)) {
     return returned;
   }
-  const extra::CityExtra* extra = LookupCityExtra(ref.player_id, ref.city_id);
+  const extra::CityExtra* extra = LookupCityExtraForCity(city, ref);
   if (extra == nullptr || yield >= extra->yield_count) {
     return returned;
   }
@@ -215,8 +233,8 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
     if (population < 0 || population > kMaxPlausiblePopulation) {
       static std::atomic<bool> kLoggedBadPopulation{false};
       if (!kLoggedBadPopulation.exchange(true)) {
-        LogF(0, "city-yield: implausible population %d (city=%p); skipping write",
-             population, city);
+        LogWarnF("city-yield: implausible population %d (city=%p); skipping write",
+                 population, city);
       }
       return returned;
     }
@@ -250,7 +268,7 @@ void* CalculateYield_Hook(void* city, void* out, int yield, int type_hash,
   if (DryRunEnabled()) {
     static std::atomic<bool> kLoggedDryRun{false};
     if (!kLoggedDryRun.exchange(true)) {
-      LogF(1, "city-yield: dry-run enabled; would add %lld to +0x%zX (was %d)",
+      LogInfoF("city-yield: dry-run enabled; would add %lld to +0x%zX (was %d)",
            static_cast<long long>(delta),
            static_cast<std::size_t>(kModifierAccumulatedOffset), modifier);
     }
@@ -295,8 +313,8 @@ bool InstallHooksOnce() {
   const bridge::EngineApi* engine = Context().engine;
   if (host == nullptr || host->installHook == nullptr || host->removeHook == nullptr ||
       engine == nullptr || engine->cityCalculateYield == nullptr) {
-    Log(0, "city-yield: CalculateYield entry unavailable; per-population modifier "
-           "will not apply");
+    LogWarn("city-yield: CalculateYield entry unavailable; per-population modifier "
+            "will not apply");
     return false;
   }
   std::lock_guard<std::mutex> guard(kHookMutex);
@@ -312,7 +330,7 @@ bool InstallHooksOnce() {
                                        reinterpret_cast<void*>(&CalculateYield_Hook),
                                        reinterpret_cast<void**>(&kCalculateYieldOriginal));
   if (status != 0) {
-    LogF(0, "city-yield: CalculateYield hook install -> %d", status);
+    LogErrorF("city-yield: CalculateYield hook install -> %d", status);
     // Undo the takeover first so the hook stops intercepting, then clear the trampoline; reversing
     // the order would leave an "enabled but null trampoline" state where the detour swallows every
     // engine yield read.
@@ -324,7 +342,7 @@ bool InstallHooksOnce() {
   }
   kCalculateYieldTarget = target;
   kCalculateYieldInstalled = true;
-  LogF(1, "city-yield: CalculateYield hook installed target=%p detour=%p trampoline=%p",
+  LogInfoF("city-yield: CalculateYield hook installed target=%p detour=%p trampoline=%p",
        kCalculateYieldTarget, reinterpret_cast<void*>(&CalculateYield_Hook),
        reinterpret_cast<void*>(kCalculateYieldOriginal));
   return true;
@@ -403,7 +421,7 @@ const bridge::EffectDesc* Describe(const bridge::Host& host) {
   }
   g_desc.typeName = "EFFECT_YKKZ000_ADJUST_CITY_YIELD_PER_POPULATION_MODIFIER";
   g_desc.templateEffect = "EFFECT_ADJUST_CITY_YIELD_MODIFIER";
-#if !defined(YKKZ000_DISABLE_CUSTOM_BEHAVIOR)
+#if !defined(DISABLE_CUSTOM_BEHAVIOR)
   const bridge::EngineApi* engine = host.engine;
   if (engine == nullptr) {
     return nullptr;

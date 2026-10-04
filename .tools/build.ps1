@@ -44,7 +44,13 @@ Options:
   --dll-build-dir <path>    CMake build directory; removed by --clean or
                             --force-rebuild=dll.
                             Default: <dll-dir>\build
-  --dll-config <cfg>        CMake build configuration.
+  -d, --debug               Build the DLLs in the Debug configuration, which
+                            defines the standard _DEBUG macro and enables debug
+                            logging. Equivalent to --dll-config Debug.
+  --no-debug, --release     Build the DLLs in the default non-debug
+                            configuration (RelWithDebInfo). This is the default.
+  --dll-config <cfg>        CMake build configuration. Cannot be combined with
+                            --debug/--no-debug.
                             Default: RelWithDebInfo
   --dll-dir <path>          CMake source directory for the DLLs.
                             Default: <projectDir>\natives
@@ -75,7 +81,8 @@ Examples:
   .\build.ps1 mod.civ6proj --clean -o "C:\temp\mod-build"
   .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --force-rebuild=dll
   .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --skip=art,dll
-  .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --force-rebuild=dll --cmake-arg=-DYKKZ000_ENABLE_STRENGTH_PROBE=ON
+  .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --force-rebuild=dll --cmake-arg=-DDISABLE_STRENGTH_PER_SUZERAIN=ON
+  .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --debug
 "@
 }
 
@@ -118,6 +125,9 @@ function Parse-Args {
     DllBuildDir  = $null
     DllPrefix    = $DefaultDllPrefix
     DllConfig    = $DefaultDllConfig
+    DllConfigExplicit = $false
+    Debug        = $false
+    NoDebug      = $false
     DllGenerator = $null
     Help         = $false
   }
@@ -270,12 +280,14 @@ function Parse-Args {
       $v = $ArgList[$i + 1]
       if ([string]::IsNullOrEmpty($v)) { throw "Option '$a' requires a value." }
       $opts.DllConfig = $v
+      $opts.DllConfigExplicit = $true
       $i += 2
     }
     elseif ($a -like '--dll-config=*') {
       $v = $a.Substring('--dll-config='.Length)
       if ([string]::IsNullOrEmpty($v)) { throw "Option '--dll-config' requires a value." }
       $opts.DllConfig = $v
+      $opts.DllConfigExplicit = $true
       $i++
     }
     elseif ($a -eq '--dll-generator') {
@@ -289,6 +301,14 @@ function Parse-Args {
       $v = $a.Substring('--dll-generator='.Length)
       if ([string]::IsNullOrEmpty($v)) { throw "Option '--dll-generator' requires a value." }
       $opts.DllGenerator = $v
+      $i++
+    }
+    elseif ($a -eq '-d' -or $a -eq '--debug') {
+      $opts.Debug = $true
+      $i++
+    }
+    elseif ($a -eq '--no-debug' -or $a -eq '--release') {
+      $opts.NoDebug = $true
       $i++
     }
     elseif ($a.Length -gt 1 -and $a[0] -eq '-') {
@@ -362,6 +382,15 @@ function Assert-Inputs {
   if ($skipDll -and $opts.CMakeArgs.Count -gt 0) {
     throw "Option '--cmake-arg' has no effect together with '--skip=dll' (the DLL build is skipped)."
   }
+  if (($opts.Debug -or $opts.NoDebug) -and $opts.DllConfigExplicit) {
+    throw "Options '--debug'/'--no-debug' and '--dll-config' cannot be used together."
+  }
+  if ($opts.Debug -and $opts.NoDebug) {
+    throw "Options '--debug' and '--no-debug' cannot be used together."
+  }
+  if ($skipDll -and ($opts.Debug -or $opts.NoDebug)) {
+    throw "Options '--debug'/'--no-debug' have no effect together with '--skip=dll'."
+  }
 
   $inputPath = Resolve-FullPath $opts.Input
   if (-not (Test-Path -LiteralPath $inputPath -PathType Leaf)) {
@@ -401,6 +430,7 @@ function Assert-Inputs {
   }
   $dllPrefix = $opts.DllPrefix
   $dllConfig = $opts.DllConfig
+  if ($opts.Debug) { $dllConfig = 'Debug' }
   $dllGenerator = $opts.DllGenerator
 
   if ([string]::IsNullOrWhiteSpace($dllPrefix)) {
@@ -641,8 +671,12 @@ function Invoke-DllBuild {
     Write-Host ("Extra CMake configure arguments: {0}" -f ($CMakeArgs -join ' '))
   }
 
+  $isMultiConfig = [string]::IsNullOrWhiteSpace($Generator) -or $Generator -like 'Visual Studio*'
+  $configureArgs = @()
+  if (-not $isMultiConfig) { $configureArgs += "-DCMAKE_BUILD_TYPE=$Config" }
+
   Write-Host ("Configuring the DLL build in {0}" -f $BuildDir)
-  & $CMake -S $DllDir -B $BuildDir @generatorArgs @CMakeArgs
+  & $CMake -S $DllDir -B $BuildDir @generatorArgs @configureArgs @CMakeArgs
   if ($LASTEXITCODE -ne 0) {
     throw "CMake configuration failed (exit $LASTEXITCODE)."
   }

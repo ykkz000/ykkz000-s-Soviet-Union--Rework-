@@ -262,9 +262,9 @@ void installCrashCapture() {
   g_vehHandle = AddVectoredExceptionHandler(
       1, reinterpret_cast<PVECTORED_EXCEPTION_HANDLER>(&CrashCapture_Handler));
   if (g_vehHandle != nullptr) {
-    logMessage(1, "Crash capture: VEH installed");
+    logInfo("Crash capture: VEH installed");
   } else {
-    logMessage(0, "Crash capture: AddVectoredExceptionHandler failed");
+    logError("Crash capture: AddVectoredExceptionHandler failed");
   }
 }
 

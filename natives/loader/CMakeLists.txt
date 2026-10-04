@@ -21,14 +21,14 @@ set_target_properties(YKKZ000Loader PROPERTIES
 
 target_link_libraries(YKKZ000Loader PRIVATE ykkz000_bridge minhook user32 advapi32 shell32 ole32)
 
-if(YKKZ000_DISABLE_EFFECT_HANDLER)
-  target_compile_definitions(YKKZ000Loader PRIVATE YKKZ000_DISABLE_EFFECT_HANDLER)
+if(DISABLE_EFFECT_HANDLER)
+  target_compile_definitions(YKKZ000Loader PRIVATE DISABLE_EFFECT_HANDLER)
 endif()
 
-if(YKKZ000_DISABLE_HANDLER_GUARD)
-  target_compile_definitions(YKKZ000Loader PRIVATE YKKZ000_DISABLE_HANDLER_GUARD)
+if(DISABLE_HANDLER_GUARD)
+  target_compile_definitions(YKKZ000Loader PRIVATE DISABLE_HANDLER_GUARD)
 endif()
 
-if(YKKZ000_ENABLE_DISPATCH_TRACE)
-  target_compile_definitions(YKKZ000Loader PRIVATE YKKZ000_ENABLE_DISPATCH_TRACE)
+if(ENABLE_DISPATCH_TRACE)
+  target_compile_definitions(YKKZ000Loader PRIVATE ENABLE_DISPATCH_TRACE)
 endif()

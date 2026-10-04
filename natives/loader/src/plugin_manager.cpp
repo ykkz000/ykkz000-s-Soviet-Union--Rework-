@@ -87,37 +87,37 @@ void callListenerGuarded(bridge::ContextListenerFn listener, bridge::GameContext
 
 void tryLoadPlugin(const std::wstring& file, const bridge::Host& hostTemplate) {
   LogScope scope("load plugin");
-  logMessage(2, L"Trying plugin DLL: " + file);
+  logDebug(L"Trying plugin DLL: " + file);
   HMODULE module = LoadLibraryW(file.c_str());
   if (module == nullptr) {
     const DWORD error = GetLastError();
     wchar_t detail[512] = {};
     _snwprintf_s(detail, _countof(detail), _TRUNCATE,
                  L"Plugin LoadLibrary failed (GetLastError=%lu): %s", error, file.c_str());
-    logMessage(1, detail);
+    logError(detail);
     return;
   }
   if (isSelfOrGameCore(module)) {
     FreeLibrary(module); // self or GameCore; skip silently
     return;
   }
-  logMessageF(1, "plugin: LoadLibrary -> %p", module);
+  logDebugF("plugin: LoadLibrary -> %p", module);
 
   auto* getPlugin = reinterpret_cast<bridge::GetPluginFn>(
       GetProcAddress(module, YKKZ000_PLUGIN_EXPORT_GETPLUGIN));
   auto* destroy = reinterpret_cast<bridge::DestroyPluginFn>(
       GetProcAddress(module, YKKZ000_PLUGIN_EXPORT_DESTROY));
-  logMessageF(1, "plugin: GetPlugin=%p DestroyPlugin=%p",
-              reinterpret_cast<void*>(getPlugin), reinterpret_cast<void*>(destroy));
+  logDebugF("plugin: GetPlugin=%p DestroyPlugin=%p",
+            reinterpret_cast<void*>(getPlugin), reinterpret_cast<void*>(destroy));
   if (getPlugin == nullptr) {
-    logMessage(1, L"Skipped: GetPlugin not exported: " + file);
+    logWarn(L"Skipped: GetPlugin not exported: " + file);
     FreeLibrary(module);
     return;
   }
 
   auto* slot = new (std::nothrow) PluginSlot();
   if (slot == nullptr) {
-    logMessage(0, "plugin: failed to allocate plugin slot");
+    logError("plugin: failed to allocate plugin slot");
     FreeLibrary(module);
     return;
   }
@@ -129,7 +129,7 @@ void tryLoadPlugin(const std::wstring& file, const bridge::Host& hostTemplate) {
   setActivePluginHandle(slot);
   const int result = getPlugin(&slot->host);
   setActivePluginHandle(nullptr);
-  logMessageF(1, "plugin: GetPlugin(host) -> %d", result);
+  logInfoF("plugin: GetPlugin(host) -> %d", result);
   if (result <= 0) {
     // GetPlugin failed: the plugin may already have registered hooks/slots/implementation
     // callbacks, so the Loader must first restore as a fallback (revoke the still-registered
@@ -147,13 +147,13 @@ void tryLoadPlugin(const std::wstring& file, const bridge::Host& hostTemplate) {
     _snwprintf_s(detail, _countof(detail), _TRUNCATE,
                  L"Plugin init failed: GetPlugin returned %d; unloaded: %s", result,
                  file.c_str());
-    logMessage(1, detail);
+    logError(detail);
     return;
   }
 
   slot->listener = slot->host.onGameContext; // the plugin registers this inside GetPlugin
   g_plugins.push_back(slot);
-  logMessage(1, L"Plugin loaded: " + file);
+  logInfo(L"Plugin loaded: " + file);
 }
 
 void scanDirectory(const std::wstring& directory, const bridge::Host& host) {
@@ -162,10 +162,10 @@ void scanDirectory(const std::wstring& directory, const bridge::Host& host) {
   const std::wstring pattern = directory + L"\\*.dll";
   HANDLE find = FindFirstFileW(pattern.c_str(), &data);
   if (find == INVALID_HANDLE_VALUE) {
-    logMessage(2, L"Plugin directory missing or has no readable DLL: " + directory);
+    logDebug(L"Plugin directory missing or has no readable DLL: " + directory);
     return;
   }
-  logMessage(1, L"Scanning plugin directory: " + directory);
+  logInfo(L"Scanning plugin directory: " + directory);
   do {
     if ((data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) {
       continue;
@@ -184,11 +184,11 @@ void loadPlugins(bridge::Host* host) {
   LogScope scope("load plugins (core)");
   g_pluginsLoaded = true;
   const std::vector<std::wstring> directories = pluginSearchDirs();
-  logMessage(1, L"Plugin search directory count: " + std::to_wstring(directories.size()));
+  logInfo(L"Plugin search directory count: " + std::to_wstring(directories.size()));
   for (const std::wstring& directory : directories) {
     scanDirectory(directory, *host);
   }
-  logMessage(1, L"Plugin loading finished; loaded count: " + std::to_wstring(g_plugins.size()));
+  logInfo(L"Plugin loading finished; loaded count: " + std::to_wstring(g_plugins.size()));
 }
 
 void setActivePluginHandle(void* pluginHandle) {

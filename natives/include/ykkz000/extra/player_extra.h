@@ -80,6 +80,12 @@ static_assert(std::is_trivially_copyable_v<CityExtra>);
 struct UnitExtra {
   std::int32_t unit_id = -1;             ///< Unit::Instance +0xB0
   std::int32_t strength_per_suzerain = 0; ///< Sum over instances
+  /// @note baseline: the aggregate restored from the unit's persisted AutoVariable after a load
+  ///       (see extra_persistence.h). The engine does not replay Apply for modifiers that survived
+  ///       the load, so the restored aggregate is tracked separately and added into
+  ///       strength_per_suzerain by RecomputeStrength; it is cleared when the restored modifier's
+  ///       Remove arrives (the common single-modifier case). Appended after the existing fields.
+  std::int32_t baseline = 0;
   std::unordered_map<void*, std::int32_t> instances; ///< key = the effect object self
 };
 

@@ -59,10 +59,10 @@ bool g_initOk = false;
 bool ensureHookServiceInitialized() {
   std::call_once(g_initOnce, []() {
     const MH_STATUS status = MH_Initialize();
-    logMessageF(1, "hook: MH_Initialize -> %d", static_cast<int>(status));
+    logInfoF("hook: MH_Initialize -> %d", static_cast<int>(status));
     g_initOk = (status == MH_OK || status == MH_ERROR_ALREADY_INITIALIZED);
     if (!g_initOk) {
-      logMessage(0, "hook: MinHook initialization failed; all hooks unavailable");
+      logFatal("hook: MinHook initialization failed; all hooks unavailable");
     }
   });
   return g_initOk;
@@ -88,14 +88,14 @@ int serviceInstallHook(void* pluginHandle, void* target, void* detour, void** or
   if (it == g_hooks.end()) {
     void* trampoline = nullptr;
     const MH_STATUS created = MH_CreateHook(target, detour, &trampoline);
-    logMessageF(1, "hook: create target=%p detour=%p -> %d trampoline=%p", target, detour,
-                static_cast<int>(created), trampoline);
+    logInfoF("hook: create target=%p detour=%p -> %d trampoline=%p", target, detour,
+             static_cast<int>(created), trampoline);
     if (created == MH_ERROR_ALREADY_CREATED) {
       // MinHook already has a hook for this target, but this service has no record: the existing
       // trampoline cannot be retrieved and the detour cannot be compared, so refuse to install as
       // a "different detour". Force-registering would yield the dangerous "enabled but trampoline
       // missing" state.
-      logMessageF(0, "hook: target=%p already created outside the hook service; refusing", target);
+      logWarnF("hook: target=%p already created outside the hook service; refusing", target);
       return -3;
     }
     if (created != MH_OK) {
@@ -117,20 +117,20 @@ int serviceInstallHook(void* pluginHandle, void* target, void* detour, void** or
     // refused (keeping "one target, one detour").
     HookRecord& record = it->second;
     if (record.detour != detour) {
-      logMessageF(0, "hook: target=%p already hooked with a different detour; refusing", target);
+      logWarnF("hook: target=%p already hooked with a different detour; refusing", target);
       return -3;
     }
     if (record.original != nullptr && *record.original != nullptr) {
       *original = *record.original; // reuse the existing trampoline (re-enable case)
-      logMessageF(1, "hook: reuse target=%p trampoline=%p", target, *record.original);
+      logInfoF("hook: reuse target=%p trampoline=%p", target, *record.original);
     }
     if (pluginHandle != nullptr && record.pluginHandle == nullptr) {
       record.pluginHandle = pluginHandle; // upgrade ownership to the plugin
     }
   }
   const MH_STATUS enabled = MH_EnableHook(target);
-  logMessageF(1, "hook: enable target=%p -> %d%s", target, static_cast<int>(enabled),
-              enabled == MH_ERROR_ENABLED ? " (already enabled)" : "");
+  logInfoF("hook: enable target=%p -> %d%s", target, static_cast<int>(enabled),
+           enabled == MH_ERROR_ENABLED ? " (already enabled)" : "");
   if (enabled != MH_OK && enabled != MH_ERROR_ENABLED) {
     return static_cast<int>(enabled);
   }
@@ -148,12 +148,12 @@ int serviceRemoveHook(void* pluginHandle, void* target) {
   }
   if (pluginHandle != nullptr && it->second.pluginHandle != nullptr &&
       it->second.pluginHandle != pluginHandle) {
-    logMessageF(0, "hook: target=%p belongs to another plugin; refusing removal", target);
+    logWarnF("hook: target=%p belongs to another plugin; refusing removal", target);
     return -1;
   }
   const MH_STATUS disabled = MH_DisableHook(target);
-  logMessageF(1, "hook: disable target=%p -> %d%s", target, static_cast<int>(disabled),
-              disabled == MH_ERROR_DISABLED ? " (already disabled)" : "");
+  logInfoF("hook: disable target=%p -> %d%s", target, static_cast<int>(disabled),
+           disabled == MH_ERROR_DISABLED ? " (already disabled)" : "");
   if (disabled != MH_OK && disabled != MH_ERROR_DISABLED) {
     return static_cast<int>(disabled);
   }
@@ -184,7 +184,7 @@ void endHookScope(bool rollback) {
     }
   }
   for (void* target : targets) {
-    logMessageF(1, "hook: scope rollback removed target=%p", target);
+    logInfoF("hook: scope rollback removed target=%p", target);
   }
 }
 
@@ -204,10 +204,10 @@ void removeHooksForPlugin(void* pluginHandle) {
     MH_RemoveHook(it->first);
     it = g_hooks.erase(it);
     ++removed;
-    logMessageF(1, "hook: removed plugin hook target=%p", target);
+    logInfoF("hook: removed plugin hook target=%p", target);
   }
   if (removed > 0) {
-    logMessageF(1, "hook: removed %d hook(s) for plugin %p", removed, pluginHandle);
+    logInfoF("hook: removed %d hook(s) for plugin %p", removed, pluginHandle);
   }
 }
 

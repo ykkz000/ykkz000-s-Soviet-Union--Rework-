@@ -4,6 +4,7 @@
 #include <cstdint>
 
 #include <ykkz000/bridge/host.h>
+#include <ykkz000/bridge/log.h>
 #include <ykkz000/civ6/city.h>
 #include <ykkz000/civ6/game_manager.h>
 #include <ykkz000/civ6/player.h>
@@ -49,6 +50,38 @@ void Log(int level, const char* message);
 /// @param[in] format Format string.
 /// @param[in] ... Format arguments.
 void LogF(int level, const char* format, ...);
+
+// -- Level wrappers --
+// Zero-overhead level macros mirroring the Loader's. TRACE is never used; DEBUG is compiled out
+// entirely unless _DEBUG is defined (so its formatting arguments are not evaluated). Plugin
+// logs are forwarded through host->log, where the Loader applies the runtime filter.
+#define LogTrace(message) ((void)0)
+#define LogTraceF(...) ((void)0)
+#if defined(_DEBUG)
+#define LogDebug(message) \
+  Log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kDebug), (message))
+#define LogDebugF(...) \
+  LogF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kDebug), __VA_ARGS__)
+#else
+#define LogDebug(message) ((void)0)
+#define LogDebugF(...) ((void)0)
+#endif
+#define LogInfo(message) \
+  Log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kInfo), (message))
+#define LogInfoF(...) \
+  LogF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kInfo), __VA_ARGS__)
+#define LogWarn(message) \
+  Log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kWarning), (message))
+#define LogWarnF(...) \
+  LogF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kWarning), __VA_ARGS__)
+#define LogError(message) \
+  Log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kError), (message))
+#define LogErrorF(...) \
+  LogF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kError), __VA_ARGS__)
+#define LogFatal(message) \
+  Log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kFatal), (message))
+#define LogFatalF(...) \
+  LogF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kFatal), __VA_ARGS__)
 
 // -- Member access layer: member reference -> offset; every read is validated via host->readField --
 

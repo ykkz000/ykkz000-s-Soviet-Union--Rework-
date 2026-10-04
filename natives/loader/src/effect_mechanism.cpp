@@ -63,10 +63,10 @@ int registerEffectImpl(std::uint32_t typeHash, const bridge::EffectImpl* impl,
   record.pluginHandle = activePluginHandle();
   std::lock_guard<std::mutex> guard(g_recordMutex);
   g_records.insert_or_assign(typeHash, record);
-  logMessageF(1, "custom: impl registered hash=0x%08X label=%s apply=%p remove=%p", typeHash,
-              record.impl.label != nullptr ? record.impl.label : "(none)",
-              reinterpret_cast<void*>(record.impl.apply),
-              reinterpret_cast<void*>(record.impl.remove));
+  logInfoF("custom: impl registered hash=0x%08X label=%s apply=%p remove=%p", typeHash,
+           record.impl.label != nullptr ? record.impl.label : "(none)",
+           reinterpret_cast<void*>(record.impl.apply),
+           reinterpret_cast<void*>(record.impl.remove));
   return 0;
 }
 
@@ -84,7 +84,7 @@ void* patchEffectObjectSlots(void* effectObject, std::uint32_t typeHash) {
   }
   EffectRecord record;
   if (!findEffectRecord(typeHash, record)) {
-    logMessageF(0, "Custom effect: missing implementation record hash=0x%08X", typeHash);
+    logErrorF("Custom effect: missing implementation record hash=0x%08X", typeHash);
     return nullptr;
   }
   const bridge::EffectImpl& impl = record.impl;
@@ -127,8 +127,8 @@ void* patchEffectObjectSlots(void* effectObject, std::uint32_t typeHash) {
     }
   }
   if (!applyPatched || !removePatched) {
-    logMessageF(0, "Custom effect: Apply/Remove slot not matched in effect object vtable; "
-                   "keeping template behavior");
+    logErrorF("Custom effect: Apply/Remove slot not matched in effect object vtable; "
+              "keeping template behavior");
     HeapFree(GetProcessHeap(), 0, block);
     return nullptr;
   }
@@ -142,10 +142,10 @@ void* patchEffectObjectSlots(void* effectObject, std::uint32_t typeHash) {
     cloneRecord.replaced = std::move(replaced);
     g_clones.push_back(std::move(cloneRecord));
   }
-  logMessageF(1, "custom: patched effect vtable hash=0x%08X label=%s block=%p vtable=%p "
-                 "applySlot=%zX removeSlot=%zX",
-              typeHash, impl.label != nullptr ? impl.label : "(none)", block, clone, applySlot,
-              removeSlot);
+  logDebugF("custom: patched effect vtable hash=0x%08X label=%s block=%p vtable=%p "
+            "applySlot=%zX removeSlot=%zX",
+            typeHash, impl.label != nullptr ? impl.label : "(none)", block, clone, applySlot,
+            removeSlot);
   *reinterpret_cast<void***>(effectObject) = clone;
   return block;
 }
@@ -162,7 +162,7 @@ extern "C" void* ykkz000_customFactoryCreate(void* self, void* outSharedPtr,
       TryReadOr(self, &civ6::ModifierEffectFactory::type_hash, std::uint32_t{0});
   EffectRecord record;
   if (!findEffectRecord(typeHash, record) || record.originalCreate == nullptr) {
-    logMessage(0, "Custom effect: missing factory implementation record");
+    logError("Custom effect: missing factory implementation record");
     return outSharedPtr;
   }
   reinterpret_cast<FactoryCreateFn>(record.originalCreate)(self, outSharedPtr, params);

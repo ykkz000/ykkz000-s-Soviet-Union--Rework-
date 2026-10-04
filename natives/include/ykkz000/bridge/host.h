@@ -13,7 +13,7 @@ namespace ykkz000::bridge {
 /// @note Evolves under an "append-only" policy: new fields may only be appended, and the meaning
 ///       of existing fields never changes; plugins use this to decide whether the host supports
 ///       the capabilities they need.
-inline constexpr std::uint32_t kHostApiVersion = 9;
+inline constexpr std::uint32_t kHostApiVersion = 13;
 
 struct Host;
 
@@ -109,6 +109,78 @@ struct EngineApi {
   ///       value/flag/steps, 0x30 bytes); the engine writes only value and zeroes the remaining
   ///       fields.
   void* trackedValueAddStep;
+
+  /// @note Added in v10 (append-only): AutoVariable persistence support.
+  /// @brief City::Instance constructor (registers the engine's AutoVariable members on its
+  ///       FAutoArchive at instance+0x08). Signature: void*(void* self).
+  void* cityConstructor;
+  /// @brief Unit::Instance constructor (same AutoVariable registration pattern).
+  ///       Signature: void*(void* self).
+  void* unitConstructor;
+  /// @brief FAutoArchive variable registration helper.
+  ///       Signature: void(void* variable, const void* name_object, void* archive), where
+  ///       name_object points to a 24-byte engine name object {void* buffer; const char* begin;
+  ///       const char* end;}. The buffer is a NUL-terminated engine-aligned allocation that the
+  ///       helper copies during the call, so the caller may release it afterwards with
+  ///       engineAlignedFree (exactly like the engine's own constructors). The helper appends the
+  ///       variable to the archive and registers its name; the caller sets the variable's
+  ///       vtable/value afterwards.
+  void* autoVariableRegister;
+  /// @brief Engine aligned allocator: void*(std::size_t size). The returned block is compatible
+  ///       with engineAlignedFree and with the engine's own containers, so it can be used for the
+  ///       storage of a custom AutoVariable.
+  void* engineAlignedMalloc;
+  /// @brief Engine aligned free wrapper: void(void* tag, void* pointer); frees the second argument
+  ///       with the engine's _aligned_free. The first argument is ignored by the engine wrapper
+  ///       (pass nullptr).
+  void* engineAlignedFree;
+
+  /// @note Added in v11 (append-only): AutoVariable archive traversal observation (diagnostics
+  ///       only; the plugin uses these solely to attribute the save/load traversal).
+  /// @brief FAutoArchive vtable slot 1: looks up the schema record for a variable by its index in
+  ///       the archive's variable vector. Signature: void* (void* archive, void* variable);
+  ///       returns the record pointer or null when absent.
+  void* autoVarLookupById;
+  /// @brief FAutoArchive vtable slot 2: ensures a schema record exists for the variable's index and
+  ///       writes its name. Signature: void (void* archive, void* variable,
+  ///       const void* name_object), where name_object is a 24-byte engine name object.
+  void* autoVarRegisterById;
+  /// @brief Schema-container record creation. Signature: void* (void* container,
+  ///       const std::uint64_t* index); returns the new record.
+  void* autoVarRecordCreate;
+  /// @brief Writes the variable name into a schema record. Signature: void* (void* record,
+  ///       const void* begin, const void* end).
+  void* autoVarRecordSetName;
+
+  /// @note Added in v12 (append-only): AutoVariable descriptor value serialization (diagnostics
+  ///       only). The engine serializes a variable's value through its descriptor vtable; these are
+  ///       the int scalar and int-array descriptor value methods the trace hooks instrument. The
+  ///       "Explicit" method receives the stream/archive as an argument; the "Implicit" method
+  ///       recovers it from variable+0x08. Which of the pair runs on save versus load is not
+  ///       assumed statically and is read from the traced caller in the log. They are reached only
+  ///       from the engine's save/load traversal, never from gameplay logic.
+  /// @brief Int descriptor value method that takes the stream explicitly. Signature:
+  ///       void (void* variable, void* stream).
+  void* autoVarIntValueExplicit;
+  /// @brief Int descriptor value method that recovers the stream from variable+0x08. Signature:
+  ///       void* (void* variable) -> status.
+  void* autoVarIntValueImplicit;
+  /// @brief Int-array descriptor value method that takes the stream explicitly. Signature:
+  ///       void (void* variable, void* stream).
+  void* autoVarIntArrayValueExplicit;
+  /// @brief Int-array descriptor value method that recovers the stream from variable+0x08.
+  ///       Signature: void* (void* variable) -> status.
+  void* autoVarIntArrayValueImplicit;
+
+  /// @note Added in v13 (append-only): per-object City/Unit serialization. The engine's own
+  ///       serialize/deserialize entry for a single object; the plugin hooks it, forwards the call
+  ///       unchanged, and then appends its custom AutoVariable values through the variable's own
+  ///       descriptor vtable (save slot +0x20, load slot +0x08), so the values travel in the same
+  ///       stream as the engine's own members. Signature: void* (void* stream, void* object).
+  void* citySerializeSave;
+  void* citySerializeLoad;
+  void* unitSerializeSave;
+  void* unitSerializeLoad;
 };
 
 /// @brief Install a hook.

@@ -34,7 +34,7 @@ using HandlerNodeInsertFn = void* (*)(void* container, void* outNode,
                                       const std::uint32_t* hash);
 using TemplateAnalyzeFn = void* (*)(void* self, void* args);
 using TemplateApplyFn = std::uint64_t (*)(void* self, void* context, void* args);
-#if defined(YKKZ000_ENABLE_DISPATCH_TRACE)
+#if defined(ENABLE_DISPATCH_TRACE)
 using HandlerDispatchFn = void* (*)(void* node);
 #endif
 
@@ -43,7 +43,7 @@ SetEffectHandlerFn    g_originalSetEffectHandler = nullptr;
 HandlerNodeInsertFn   g_originalHandlerNodeInsert = nullptr;
 TemplateAnalyzeFn     g_originalTemplateAnalyze = nullptr;
 TemplateApplyFn       g_originalTemplateApply = nullptr;
-#if defined(YKKZ000_ENABLE_DISPATCH_TRACE)
+#if defined(ENABLE_DISPATCH_TRACE)
 HandlerDispatchFn     g_originalHandlerDispatch = nullptr;
 #endif
 void*                 g_handlerRoot = nullptr;
@@ -87,7 +87,7 @@ constexpr long kTraceStride = 256;
 
 // Dispatch-hook throttling parameters: print everything for the first N calls, then sample.
 // Invalid handlers are always printed.
-#if defined(YKKZ000_ENABLE_DISPATCH_TRACE)
+#if defined(ENABLE_DISPATCH_TRACE)
 constexpr long kDispatchFullCalls = 64;
 constexpr long kDispatchStride = 256;
 #endif
@@ -176,8 +176,8 @@ int registerCustomEffectHandlersForRoot(void* root);
 void SetEffectHandler_Hook(void* root, int kind, std::uint32_t hash, void* handlerObject) {
   const long call = ++s_setCalls;
   if (call <= kTraceFullCalls || (call % kTraceStride) == 0) {
-    logMessageF(1, "set: call#%ld root=%p kind=%d hash=0x%08X handler=%p", call, root, kind,
-                hash, handlerObject);
+    logDebugF("set: call#%ld root=%p kind=%d hash=0x%08X handler=%p", call, root, kind,
+              hash, handlerObject);
   }
   // Let the engine's own registration take effect first, then mirror the re-registration, to avoid
   // modifying the same container during its internal iteration.
@@ -200,8 +200,8 @@ void SetEffectHandler_Hook(void* root, int kind, std::uint32_t hash, void* handl
     }
     if (needRegister) {
       ++g_registerDepth;
-      logMessageF(1, "handler: runtime root detected root=%p (from kind=%d hash=0x%08X)",
-                  root, kind, hash);
+      logInfoF("handler: runtime root detected root=%p (from kind=%d hash=0x%08X)",
+               root, kind, hash);
       registerCustomEffectHandlersForRoot(root);
       --g_registerDepth;
     }
@@ -224,8 +224,8 @@ void* HandlerNodeInsert_Hook(void* container, void* outNode, const std::uint32_t
         std::lock_guard<std::mutex> guard(g_handlerMutex);
         g_templateNodes[*hash] = node;
       }
-      logMessageF(1, "handler: template effect node captured template=0x%08X node=%p", *hash,
-                  node);
+      logDebugF("handler: template effect node captured template=0x%08X node=%p", *hash,
+                node);
     }
   }
   return result;
@@ -248,7 +248,7 @@ void* templateEffectHandlerObject(std::uint32_t templateHash) {
       return handler;
     }
   }
-  logMessageF(0, "handler: template node 0x%08X not captured; handler unavailable", templateHash);
+  logErrorF("handler: template node 0x%08X not captured; handler unavailable", templateHash);
   return nullptr;
 }
 
@@ -324,12 +324,12 @@ void* customEffectHandlerObject(std::uint32_t effectHash, std::uint32_t template
   }
   void* handler = templateEffectHandlerObject(templateHash);
   if (!isPlausiblePointer(handler)) {
-    logMessageF(0, "handler: template 0x%08X handler unavailable; clone aborted", templateHash);
+    logErrorF("handler: template 0x%08X handler unavailable; clone aborted", templateHash);
     return nullptr;
   }
   void* table = readPointer(handler, offsetof(civ6::HandlerObject, table)); // handler[0] = descriptor table
   if (!isPlausiblePointer(table)) {
-    logMessageF(0, "handler: template 0x%08X handler table invalid; clone aborted", templateHash);
+    logErrorF("handler: template 0x%08X handler table invalid; clone aborted", templateHash);
     return nullptr;
   }
 
@@ -366,7 +366,7 @@ void* customEffectHandlerObject(std::uint32_t effectHash, std::uint32_t template
     g_customHandlerObjects[effectHash] = handlerObject;
   }
 
-  logMessageF(1,
+  logDebugF(
               "handler: custom handler cloned effect=0x%08X template=0x%08X table=%p clone=%p "
               "analyze=%p apply=%p release=%p plugin=%p/%p",
               effectHash, templateHash, table, clone, originals.analyze, originals.apply,
@@ -379,7 +379,7 @@ void* customEffectHandlerObject(std::uint32_t effectHash, std::uint32_t template
 void* TemplateAnalyze_Hook(void* self, void* args) {
   const long call = ++s_analyzeCalls;
   if (call <= kTraceFullCalls || (call % kTraceStride) == 0) {
-    logMessageF(1, "analyze: call#%ld self=%p args=%p", call, self, args);
+    logDebugF("analyze: call#%ld self=%p args=%p", call, self, args);
   }
   return g_originalTemplateAnalyze != nullptr ? g_originalTemplateAnalyze(self, args) : nullptr;
 }
@@ -401,7 +401,7 @@ std::uint64_t TemplateApply_Hook(void* self, void* context, void* args) {
         population = readInt32(city, offsetof(civ6::City::Instance, population));
       }
     }
-    logMessageF(1,
+    logDebugF(
                 "apply: call#%ld self=%p context=%p args=%p amount=%d yield=%d city=%p pop=%d",
                 call, self, context, args, amount, yieldType, city, population);
   }
@@ -412,8 +412,8 @@ std::uint64_t TemplateApply_Hook(void* self, void* context, void* args) {
 //   handler = *(node+0x18); if (handler) { table = *(handler); return table[6](handler); } return 1;
 // Note: this is not effect-handler dispatch, but a generic node->object->virtual-call-slot +0x30
 // helper; it is diagnostic only and is not installed by default (rebuild with
-// -DYKKZ000_ENABLE_DISPATCH_TRACE=ON when evidence is needed).
-#if defined(YKKZ000_ENABLE_DISPATCH_TRACE)
+// -DENABLE_DISPATCH_TRACE=ON when evidence is needed).
+#if defined(ENABLE_DISPATCH_TRACE)
 void* HandlerDispatch_Hook(void* node) {
   static std::atomic<long> s_dispatchCalls{0};
   const long call = ++s_dispatchCalls;
@@ -441,14 +441,18 @@ void* HandlerDispatch_Hook(void* node) {
     if (moduleBase != 0 && caller > moduleBase) {
       callerRva = caller - moduleBase;
     }
-    logMessageF(invalid ? 0 : 1,
-                "dispatch: call#%ld node=%p hash=0x%08X handler=%p table=%p slot6=%p "
-                "caller_rva=0x%zX%s",
-                call, node, hash, handler, table, slotSix, callerRva,
-                invalid ? "  <-- INVALID (guard: return 1)" : "");
+    if (invalid) {
+      logErrorF("dispatch: call#%ld node=%p hash=0x%08X handler=%p table=%p slot6=%p "
+                "caller_rva=0x%zX  <-- INVALID (guard: return 1)",
+                call, node, hash, handler, table, slotSix, callerRva);
+    } else {
+      logDebugF("dispatch: call#%ld node=%p hash=0x%08X handler=%p table=%p slot6=%p "
+                "caller_rva=0x%zX",
+                call, node, hash, handler, table, slotSix, callerRva);
+    }
   }
 
-#if !defined(YKKZ000_DISABLE_HANDLER_GUARD)
+#if !defined(DISABLE_HANDLER_GUARD)
   if (invalid) {
     return reinterpret_cast<void*>(1); // the engine's own "no handler" semantics
   }
@@ -463,7 +467,7 @@ void* HandlerDispatch_Hook(void* node) {
 int registerCustomEffectHandlersForRoot(void* root) {
   const GameCoreApi& api = gameCore();
   if (root == nullptr || api.setEffectHandler == nullptr) {
-    logMessage(0, "handler: registry unavailable; custom effect handlers not registered");
+    logError("handler: registry unavailable; custom effect handlers not registered");
     return 0;
   }
 
@@ -482,20 +486,20 @@ int registerCustomEffectHandlersForRoot(void* root) {
         customEffectHandlerObject(effect.hash, effect.templateHash, record.impl,
                                   record.pluginHandle);
     if (handlerObject == nullptr) {
-      logMessageF(0, "handler: no handler for hash=0x%08X template=0x%08X; skipped",
-                  effect.hash, effect.templateHash);
+      logErrorF("handler: no handler for hash=0x%08X template=0x%08X; skipped",
+                effect.hash, effect.templateHash);
       continue;
     }
     reinterpret_cast<SetEffectHandlerFn>(api.setEffectHandler)(
         root, kHandlerKindEffects, effect.hash, handlerObject);
-    logMessageF(1,
+    logInfoF(
                 "handler: registered hash=0x%08X kind=%d root=%p handler=%p template=0x%08X "
                 "type=%s",
                 effect.hash, kHandlerKindEffects, root, handlerObject, effect.templateHash,
                 effect.typeName.c_str());
     ++count;
   }
-  logMessageF(1, "handler: registration complete root=%p count=%d", root, count);
+  logInfoF("handler: registration complete root=%p count=%d", root, count);
   return count;
 }
 
@@ -515,14 +519,14 @@ void removeCustomEffectHandlersImpl() {
     root = g_registeredRoot; // the init root is only valid during table construction; caught below if unreadable
   }
   if (root == nullptr) {
-    logMessage(1, "handler: no registry root recorded; skip removal");
+    logInfo("handler: no registry root recorded; skip removal");
     return;
   }
   if (!isPlausibleRegistryRoot(root)) {
     // When exiting the whole game the engine may have already torn down the registry, leaving the
     // memory unreadable; skip in that case. Slot 4 is already a no-op, so skipping the removal
     // does not cause a shutdown crash.
-    logMessageF(1, "handler: skip stale root %p; removal aborted", root);
+    logWarnF("handler: skip stale root %p; removal aborted", root);
     return;
   }
   const std::vector<RegisteredEffect> effects = registeredEffects();
@@ -535,7 +539,7 @@ void removeCustomEffectHandlersImpl() {
         root, kHandlerKindEffects, effect.hash, nullptr);
     ++removed;
   }
-  logMessageF(1, "handler: custom handlers removed root=%p count=%d", root, removed);
+  logInfoF("handler: custom handlers removed root=%p count=%d", root, removed);
 }
 
 // hook FUN_1804891b0: RCX is the handler table root. The original function must first build all
@@ -548,7 +552,7 @@ void* HandlerRegistryInit_Hook(void* root) {
   if (g_originalHandlerRegistryInit == nullptr) {
     return root;
   }
-  logMessageF(1, "registry-init: root=%p", root);
+  logDebugF("registry-init: root=%p", root);
   {
     std::lock_guard<std::mutex> guard(g_handlerMutex);
     g_handlerRoot = root;
@@ -582,8 +586,8 @@ void clearHandlerCallbacksForPlugin(void* pluginHandle) {
 }
 
 bool installEffectHandlerHook() {
-#if defined(YKKZ000_DISABLE_EFFECT_HANDLER)
-  logMessage(1, "Effect handler hook: disabled by YKKZ000_DISABLE_EFFECT_HANDLER");
+#if defined(DISABLE_EFFECT_HANDLER)
+  logInfo("Effect handler hook: disabled by DISABLE_EFFECT_HANDLER");
   return false;
 #else
   std::lock_guard<std::mutex> guard(g_hookMutex);
@@ -592,30 +596,30 @@ bool installEffectHandlerHook() {
   }
   LogScope scope("install effect handler hook");
   const GameCoreApi& api = gameCore();
-  logMessageF(1, "handler: registryInit=%p setHandler=%p handlerData=%p table=%p analyze=%p apply=%p",
-              api.handlerRegistryInit, api.setEffectHandler, api.profiledHandlerData,
-              api.profiledHandlerTable, api.profiledHandlerAnalyze, api.profiledHandlerApply);
+  logDebugF("handler: registryInit=%p setHandler=%p handlerData=%p table=%p analyze=%p apply=%p",
+            api.handlerRegistryInit, api.setEffectHandler, api.profiledHandlerData,
+            api.profiledHandlerTable, api.profiledHandlerAnalyze, api.profiledHandlerApply);
   if (api.handlerRegistryInit == nullptr || api.setEffectHandler == nullptr) {
-    logMessage(0, "Effect handler hook: entry points unavailable; custom effects may crash "
-                  "when the engine resolves their handler");
+    logError("Effect handler hook: entry points unavailable; custom effects may crash "
+             "when the engine resolves their handler");
     return false;
   }
   if (!ensureHookServiceInitialized()) {
-    logMessage(0, "Effect handler hook: MinHook initialization failed");
+    logFatal("Effect handler hook: MinHook initialization failed");
     return false;
   }
 
   auto addHook = [](void* target, LPVOID detour, LPVOID* trampoline, const char* name) {
     if (target == nullptr) {
-      logMessageF(1, "handler: hook %s target unavailable; skipped", name);
+      logWarnF("handler: hook %s target unavailable; skipped", name);
       return;
     }
     const int status = installHookRaw(target, detour, reinterpret_cast<void**>(trampoline));
     if (status != 0) {
-      logMessageF(0, "handler: install hook %s -> %d", name, status);
+      logErrorF("handler: install hook %s -> %d", name, status);
       return;
     }
-    logMessageF(1, "handler: hook %s installed target=%p trampoline=%p", name, target, *trampoline);
+    logInfoF("handler: hook %s installed target=%p trampoline=%p", name, target, *trampoline);
   };
 
   addHook(api.handlerRegistryInit, reinterpret_cast<LPVOID>(&HandlerRegistryInit_Hook),
@@ -632,13 +636,13 @@ bool installEffectHandlerHook() {
           reinterpret_cast<LPVOID*>(&g_originalTemplateAnalyze), "profiledHandlerAnalyze");
   addHook(api.profiledHandlerApply, reinterpret_cast<LPVOID>(&TemplateApply_Hook),
           reinterpret_cast<LPVOID*>(&g_originalTemplateApply), "profiledHandlerApply");
-#if defined(YKKZ000_ENABLE_DISPATCH_TRACE)
+#if defined(ENABLE_DISPATCH_TRACE)
   addHook(api.effectHandlerDispatch, reinterpret_cast<LPVOID>(&HandlerDispatch_Hook),
           reinterpret_cast<LPVOID*>(&g_originalHandlerDispatch), "handlerDispatch");
 #endif
 
   g_handlerHookInstalled = true;
-  logMessage(1, "Effect handler hook: installed");
+  logInfo("Effect handler hook: installed");
   return true;
 #endif
 }
@@ -667,7 +671,7 @@ void uninstallEffectHandlerHook() {
     if (api.profiledHandlerApply != nullptr) {
       (void)removeHookRaw(api.profiledHandlerApply);
     }
-#if defined(YKKZ000_ENABLE_DISPATCH_TRACE)
+#if defined(ENABLE_DISPATCH_TRACE)
     if (api.effectHandlerDispatch != nullptr) {
       (void)removeHookRaw(api.effectHandlerDispatch);
     }

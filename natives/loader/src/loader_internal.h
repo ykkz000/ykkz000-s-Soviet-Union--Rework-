@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <ykkz000/bridge/host.h>
+#include <ykkz000/bridge/log.h>
 #include <ykkz000/civ6/common.h>
 #include <ykkz000/civ6/effect.h>
 #include <ykkz000/civ6/factory.h>
@@ -72,6 +73,53 @@ struct GameCoreApi {
   ///       modifier-detail append entry (step layout in civ6::YieldValue; the fifth argument
   ///       passes the localization key on the stack).
   void*   trackedValueAddStep = nullptr;
+  /// @note AutoVariable persistence support (optional: when any of these is missing, the plugin's
+  ///       persistence layer degrades to the current in-memory-only behavior).
+  ///       City::Instance constructor: void*(void* self).
+  void*   cityConstructor = nullptr;
+  /// @brief Unit::Instance constructor: void*(void* self).
+  void*   unitConstructor = nullptr;
+  /// @brief FAutoArchive variable registration helper:
+  ///       void(void* variable, const void* name, void* archive).
+  void*   autoVariableRegister = nullptr;
+  /// @brief Engine aligned free wrapper: void(void* tag, void* pointer); frees the second argument.
+  void*   engineAlignedFree = nullptr;
+  /// @note AutoVariable archive traversal observation (optional, diagnostics only: when any of
+  ///       these is missing, the corresponding observation hook is skipped and persistence and
+  ///       gameplay are unaffected).
+  /// @brief FAutoArchive vtable slot 1: void* (void* archive, void* variable) -> schema record.
+  void*   autoVarLookupById = nullptr;
+  /// @brief FAutoArchive vtable slot 2: void (void* archive, void* variable, const void* name).
+  void*   autoVarRegisterById = nullptr;
+  /// @brief Schema-container record creation: void* (void* container, const std::uint64_t* index).
+  void*   autoVarRecordCreate = nullptr;
+  /// @brief Writes the variable name into a schema record:
+  ///       void* (void* record, const void* begin, const void* end).
+  void*   autoVarRecordSetName = nullptr;
+  /// @note AutoVariable descriptor value serialization (optional, diagnostics only: when any of
+  ///       these is missing, the corresponding observation hook is skipped and persistence and
+  ///       gameplay are unaffected). "Explicit" receives the stream as an argument; "Implicit"
+  ///       recovers it from variable+0x08. Save/load direction is read from the traced caller.
+  /// @brief Int descriptor value method taking the stream explicitly: void (void* variable, void* stream).
+  void*   autoVarIntValueExplicit = nullptr;
+  /// @brief Int descriptor value method recovering the stream from variable+0x08:
+  ///       void* (void* variable) -> status.
+  void*   autoVarIntValueImplicit = nullptr;
+  /// @brief Int-array descriptor value method taking the stream explicitly:
+  ///       void (void* variable, void* stream).
+  void*   autoVarIntArrayValueExplicit = nullptr;
+  /// @brief Int-array descriptor value method recovering the stream from variable+0x08:
+  ///       void* (void* variable) -> status.
+  void*   autoVarIntArrayValueImplicit = nullptr;
+  /// @note Per-object City/Unit serialization (optional, non-fatal: when any of these is missing,
+  ///       the plugin keeps its in-memory-only behavior). The engine's own serialize/deserialize
+  ///       entry for a single City/Unit; the plugin hooks it to append its custom AutoVariable
+  ///       values after the engine's own members on save and read them back on load.
+  ///       Signature: void* (void* stream, void* object).
+  void*   citySerializeSave = nullptr;
+  void*   citySerializeLoad = nullptr;
+  void*   unitSerializeSave = nullptr;
+  void*   unitSerializeLoad = nullptr;
   /// @note Handler registration entries: handlerRegistryInit/setEffectHandler/handlerNodeInsert are
   ///       code. FUN_1804891b0(root) builds the built-in handler tables.
   void*   handlerRegistryInit = nullptr;
@@ -126,16 +174,48 @@ void logMessage(int level, const std::wstring& message);
 /// @param[in] ... Format arguments.
 void logMessageF(int level, const char* format, ...);
 
+// -- Level wrappers --
+// Zero-overhead level macros. TRACE is never used; DEBUG is compiled out entirely unless
+// _DEBUG is defined (so its formatting arguments are not evaluated). INFO and above always
+// compile; the Loader's writer additionally applies the runtime YKKZ000_LOG_LEVEL filter.
+#define logTrace(message) ((void)0)
+#define logTraceF(...) ((void)0)
+#if defined(_DEBUG)
+#define logDebug(message) \
+  logMessage(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kDebug), (message))
+#define logDebugF(...) \
+  logMessageF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kDebug), __VA_ARGS__)
+#else
+#define logDebug(message) ((void)0)
+#define logDebugF(...) ((void)0)
+#endif
+#define logInfo(message) \
+  logMessage(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kInfo), (message))
+#define logInfoF(...) \
+  logMessageF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kInfo), __VA_ARGS__)
+#define logWarn(message) \
+  logMessage(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kWarning), (message))
+#define logWarnF(...) \
+  logMessageF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kWarning), __VA_ARGS__)
+#define logError(message) \
+  logMessage(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kError), (message))
+#define logErrorF(...) \
+  logMessageF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kError), __VA_ARGS__)
+#define logFatal(message) \
+  logMessage(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kFatal), (message))
+#define logFatalF(...) \
+  logMessageF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kFatal), __VA_ARGS__)
+
 /// @brief Stage log: the constructor emits "BEGIN: <stage>", the destructor emits "END: <stage>".
 class LogScope {
  public:
   /// @brief Enter the stage; emits the BEGIN log.
   /// @param[in] stage Stage name (must stay valid for the LogScope lifetime).
   explicit LogScope(const char* stage) : stage_(stage) {
-    logMessage(1, (std::string("BEGIN: ") + stage_).c_str());
+    logInfo((std::string("BEGIN: ") + stage_).c_str());
   }
   /// @brief Leave the stage; emits the END log.
-  ~LogScope() { logMessage(1, (std::string("END: ") + stage_).c_str()); }
+  ~LogScope() { logInfo((std::string("END: ") + stage_).c_str()); }
   LogScope(const LogScope&) = delete;
   LogScope& operator=(const LogScope&) = delete;
 

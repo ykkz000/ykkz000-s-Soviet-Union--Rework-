@@ -67,6 +67,14 @@ constexpr char kTypesInsertAnchor[] =
 //        degrades to directly accumulating +0x40).
 //      * 0x133780 GetYieldFromPopulation (called at CalculateYield 0x180130013): the per-population
 //        yield arrays are at city+0x690/+0x6A0/+0x6A8, unit FixedPoint<8>.
+//      * 0x127DE0 City::Instance::Instance and 0x39B140 Unit::Instance::Instance register the
+//        engine's FAutoVariable members on the object's own FAutoArchive at instance+0x08; the
+//        variable objects are {vtable, archive, value/data[, capacity, size]}. 0x9953D0(variable,
+//        name, archive) appends a variable to the archive and records its name (the engine's own
+//        constructors set the purecall vtable before the call and the descriptor vtable after).
+//        The plugin uses these to persist its side tables with the engine's own save/load:
+//        0x990900 is the aligned allocator (Platform::MallocTemp) and 0x036E20(tag, pointer) the
+//        matching aligned free.
 //
 //    Anchor RVA self-check: the fingerprint (TimeDateStamp+SizeOfImage) only proves "same game
 //    version"; it cannot detect a profile taken from another file of the same name (once globally
@@ -94,6 +102,47 @@ struct BuildProfile {
   // verified; step is isomorphic to the modifier sub-object (civ6::YieldValue), and the tooltip key
   // is passed on the stack (see the verification record above).
   std::ptrdiff_t rvaTrackedValueAddStep;
+  // AutoVariable persistence support (optional, non-fatal): the City/Unit constructors register
+  // their engine FAutoVariable members, the archive registration helper adds a custom variable to
+  // an object's own archive, and the aligned-free wrapper releases blocks from Platform::MallocTemp.
+  std::ptrdiff_t rvaCityConstructor;
+  std::ptrdiff_t rvaUnitConstructor;
+  std::ptrdiff_t rvaAutoVariableRegister;
+  std::ptrdiff_t rvaEngineAlignedFree;
+  // AutoVariable archive traversal observation (optional, diagnostics only): archive vtable slots
+  // 1/2 plus the schema-container record helpers they call. Verified at 0x180000000+rva on the
+  // release image:
+  //   * 0x44570 FAutoArchive vt[1]: finds the variable's index in the archive vector, then looks up
+  //     the schema record for that index; returns record+0x08 or null.
+  //   * 0x44670 FAutoArchive vt[2]: ensures a schema record exists for the index, creating one via
+  //     0x43AC0 and writing the name via 0x42A60 when absent.
+  //   * 0x43AC0 creates a schema-container record for an index.
+  //   * 0x42A60 copies the name into a record.
+  std::ptrdiff_t rvaAutoVarLookupById;
+  std::ptrdiff_t rvaAutoVarRegisterById;
+  std::ptrdiff_t rvaAutoVarRecordCreate;
+  std::ptrdiff_t rvaAutoVarRecordSetName;
+  // AutoVariable descriptor value serialization observation (optional, diagnostics only): the int
+  // scalar and int-array descriptor value methods the trace hooks instrument. Verified at
+  // 0x180000000+rva on the release image:
+  //   * 0x4C46E0 int descriptor, stream explicit: void(variable, stream) transfers 4 bytes at
+  //     variable+0x10.
+  //   * 0x35F3A0 int descriptor, stream from variable+0x08: void*(variable) transfers 4 bytes.
+  //   * 0x140930 int-array descriptor, stream explicit: void(variable, stream) transfers the array
+  //     at variable+0x10 (pointer/count pair).
+  //   * 0x1931A0 int-array descriptor, stream from variable+0x08: void*(variable).
+  std::ptrdiff_t rvaAutoVarIntValueExplicit;
+  std::ptrdiff_t rvaAutoVarIntValueImplicit;
+  std::ptrdiff_t rvaAutoVarIntArrayValueExplicit;
+  std::ptrdiff_t rvaAutoVarIntArrayValueImplicit;
+  // City/Unit per-object serialization (optional, non-fatal): the engine's own serialize/deserialize
+  // function for a single City/Unit. The plugin hooks them to append its custom AutoVariable values
+  // after the engine's own members on save and read them back on load through the same stream.
+  // Signature: void* (void* stream, void* object).
+  std::ptrdiff_t rvaCitySerializeSave;
+  std::ptrdiff_t rvaCitySerializeLoad;
+  std::ptrdiff_t rvaUnitSerializeSave;
+  std::ptrdiff_t rvaUnitSerializeLoad;
   // Handler registration: the first three are code; the last two are data (the profiled handler
   // object/descriptor table, not runtime-validated, diagnostics only).
   std::ptrdiff_t rvaHandlerRegistryInit;
@@ -130,6 +179,22 @@ constexpr BuildProfile kKnownXp2Build{
     0x131CF0,     // City::Instance::ChangeYieldModifier(YieldTypes, int)
     0x12FF20,     // City::Instance::CalculateYield(YieldTypes, TypeHash, bool) -> TrackedValue
     0x12FC10,     // TrackedValue::AddStep(this=modifier sub-object, step, u32, u32, tooltipKey)
+    0x127DE0,     // City::Instance::Instance(self): registers the engine's AutoVariable members
+    0x39B140,     // Unit::Instance::Instance(self): registers the engine's AutoVariable members
+    0x9953D0,     // FAutoArchive variable registration: void(variable, name, archive)
+    0x036E20,     // _aligned_free wrapper: void(tag, pointer) (frees the second argument)
+    0x44570,      // FAutoArchive vt[1]: lookup schema record by variable index (optional/diagnostic)
+    0x44670,      // FAutoArchive vt[2]: ensure schema record + write name (optional/diagnostic)
+    0x43AC0,      // schema-container record creation (optional/diagnostic)
+    0x42A60,      // schema-record name write (optional/diagnostic)
+    0x4C46E0,     // int AutoVariable descriptor value, stream explicit (optional/diagnostic)
+    0x35F3A0,     // int AutoVariable descriptor value, stream from variable+0x08 (optional)
+    0x140930,     // int-array AutoVariable descriptor value, stream explicit (optional)
+    0x1931A0,     // int-array AutoVariable descriptor value, stream from variable+0x08 (optional)
+    0x12E320,     // City::Instance serialize (save): void*(stream, city)
+    0x12C950,     // City::Instance deserialize (load): void*(stream, city)
+    0x3A1220,     // Unit::Instance serialize (save): void*(stream, unit)
+    0x39F670,     // Unit::Instance deserialize (load): void*(stream, unit)
     0x4891B0,     // FUN_1804891b0(void* root): builds the built-in handler registry
     0x6083F0,     // FUN_1806083f0(root, kind, hash, handlerObj): sets/replaces/removes a handler
     0x489040,     // FUN_180489040(container, outNode, hashPtr): handler table insert/lookup
@@ -211,15 +276,22 @@ const std::uint8_t* findString(HMODULE module, const char* text) {
 // detect "a different build was loaded". The real identity self-check is the anchor-RVA runtime
 // comparison in resolveApi.
 void logRva(const char* name, void* function, HMODULE module, std::ptrdiff_t expected) {
+#if defined(_DEBUG)
   if (function == nullptr) {
-    logMessageF(0, "%s: <null>", name);
+    logDebugF("%s: <null>", name);
     return;
   }
   const auto actual = static_cast<std::ptrdiff_t>(
       reinterpret_cast<const std::uint8_t*>(function) -
       reinterpret_cast<const std::uint8_t*>(module));
-  logMessageF(1, "%s: rva=0x%zX (profile 0x%zX, arithmetic check)",
-              name, static_cast<std::size_t>(actual), static_cast<std::size_t>(expected));
+  logDebugF("%s: rva=0x%zX (profile 0x%zX, arithmetic check)",
+            name, static_cast<std::size_t>(actual), static_cast<std::size_t>(expected));
+#else
+  (void)name;
+  (void)function;
+  (void)module;
+  (void)expected;
+#endif
 }
 
 bool resolveApi(HMODULE module, GameCoreApi& out) {
@@ -236,7 +308,7 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
                 "(expected 0x%08X) SizeOfImage=0x%X (expected 0x%X)",
                 nt->FileHeader.TimeDateStamp, kKnownXp2Build.timeDateStamp,
                 nt->OptionalHeader.SizeOfImage, kKnownXp2Build.sizeOfImage);
-    logMessage(1, detail);
+    logWarn(detail);
     return false;
   }
 
@@ -244,7 +316,7 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   const auto* collectionAnchor = findString(module, kCollectionMissingAnchor);
   const auto* typesAnchor = findString(module, kTypesInsertAnchor);
   if (effectAnchor == nullptr || collectionAnchor == nullptr || typesAnchor == nullptr) {
-    logMessage(0, "GameCore anchor strings missing; build may be unexpected");
+    logError("GameCore anchor strings missing; build may be unexpected");
     return false;
   }
 
@@ -259,17 +331,17 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
       static_cast<std::ptrdiff_t>(collectionAnchor - base);
   const std::ptrdiff_t typesAnchorRva =
       static_cast<std::ptrdiff_t>(typesAnchor - base);
-  logMessageF(1, "anchor rva: effect=0x%zX collection=0x%zX types=0x%zX",
-              static_cast<std::size_t>(effectAnchorRva),
-              static_cast<std::size_t>(collectionAnchorRva),
-              static_cast<std::size_t>(typesAnchorRva));
+  logDebugF("anchor rva: effect=0x%zX collection=0x%zX types=0x%zX",
+            static_cast<std::size_t>(effectAnchorRva),
+            static_cast<std::size_t>(collectionAnchorRva),
+            static_cast<std::size_t>(typesAnchorRva));
 
   // The measured anchor RVAs must match the profile: this is the check that can really detect
   // "a different build was loaded".
   if (effectAnchorRva != kKnownXp2Build.rvaEffectAnchor ||
       collectionAnchorRva != kKnownXp2Build.rvaCollectionAnchor ||
       typesAnchorRva != kKnownXp2Build.rvaTypesAnchor) {
-    logMessageF(0,
+    logErrorF(
                 "Anchor RVA mismatch: the loaded GameCore differs from the profiled build "
                 "(effect 0x%zX/0x%zX, collection 0x%zX/0x%zX, types 0x%zX/0x%zX); "
                 "refusing to use fixed RVAs",
@@ -325,6 +397,24 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   resolved.changeYieldModifier = computeRva(kKnownXp2Build.rvaChangeYieldModifier);
   resolved.cityCalculateYield = computeRva(kKnownXp2Build.rvaCityCalculateYield);
   resolved.trackedValueAddStep = computeRva(kKnownXp2Build.rvaTrackedValueAddStep);
+  resolved.cityConstructor = computeRva(kKnownXp2Build.rvaCityConstructor);
+  resolved.unitConstructor = computeRva(kKnownXp2Build.rvaUnitConstructor);
+  resolved.autoVariableRegister = computeRva(kKnownXp2Build.rvaAutoVariableRegister);
+  resolved.engineAlignedFree = computeRva(kKnownXp2Build.rvaEngineAlignedFree);
+  resolved.autoVarLookupById = computeRva(kKnownXp2Build.rvaAutoVarLookupById);
+  resolved.autoVarRegisterById = computeRva(kKnownXp2Build.rvaAutoVarRegisterById);
+  resolved.autoVarRecordCreate = computeRva(kKnownXp2Build.rvaAutoVarRecordCreate);
+  resolved.autoVarRecordSetName = computeRva(kKnownXp2Build.rvaAutoVarRecordSetName);
+  resolved.autoVarIntValueExplicit = computeRva(kKnownXp2Build.rvaAutoVarIntValueExplicit);
+  resolved.autoVarIntValueImplicit = computeRva(kKnownXp2Build.rvaAutoVarIntValueImplicit);
+  resolved.autoVarIntArrayValueExplicit =
+      computeRva(kKnownXp2Build.rvaAutoVarIntArrayValueExplicit);
+  resolved.autoVarIntArrayValueImplicit =
+      computeRva(kKnownXp2Build.rvaAutoVarIntArrayValueImplicit);
+  resolved.citySerializeSave = computeRva(kKnownXp2Build.rvaCitySerializeSave);
+  resolved.citySerializeLoad = computeRva(kKnownXp2Build.rvaCitySerializeLoad);
+  resolved.unitSerializeSave = computeRva(kKnownXp2Build.rvaUnitSerializeSave);
+  resolved.unitSerializeLoad = computeRva(kKnownXp2Build.rvaUnitSerializeLoad);
   resolved.handlerRegistryInit = computeRva(kKnownXp2Build.rvaHandlerRegistryInit);
   resolved.setEffectHandler = computeRva(kKnownXp2Build.rvaSetEffectHandler);
   resolved.handlerNodeInsert = computeRva(kKnownXp2Build.rvaHandlerNodeInsert);
@@ -359,14 +449,46 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
          kKnownXp2Build.rvaCityCalculateYield);
   logRva("trackedValueAddStep", resolved.trackedValueAddStep, module,
          kKnownXp2Build.rvaTrackedValueAddStep);
+  logRva("cityConstructor", resolved.cityConstructor, module,
+         kKnownXp2Build.rvaCityConstructor);
+  logRva("unitConstructor", resolved.unitConstructor, module,
+         kKnownXp2Build.rvaUnitConstructor);
+  logRva("autoVariableRegister", resolved.autoVariableRegister, module,
+         kKnownXp2Build.rvaAutoVariableRegister);
+  logRva("engineAlignedFree", resolved.engineAlignedFree, module,
+         kKnownXp2Build.rvaEngineAlignedFree);
+  logRva("autoVarLookupById", resolved.autoVarLookupById, module,
+         kKnownXp2Build.rvaAutoVarLookupById);
+  logRva("autoVarRegisterById", resolved.autoVarRegisterById, module,
+         kKnownXp2Build.rvaAutoVarRegisterById);
+  logRva("autoVarRecordCreate", resolved.autoVarRecordCreate, module,
+         kKnownXp2Build.rvaAutoVarRecordCreate);
+  logRva("autoVarRecordSetName", resolved.autoVarRecordSetName, module,
+         kKnownXp2Build.rvaAutoVarRecordSetName);
+  logRva("autoVarIntValueExplicit", resolved.autoVarIntValueExplicit, module,
+         kKnownXp2Build.rvaAutoVarIntValueExplicit);
+  logRva("autoVarIntValueImplicit", resolved.autoVarIntValueImplicit, module,
+         kKnownXp2Build.rvaAutoVarIntValueImplicit);
+  logRva("autoVarIntArrayValueExplicit", resolved.autoVarIntArrayValueExplicit, module,
+         kKnownXp2Build.rvaAutoVarIntArrayValueExplicit);
+  logRva("autoVarIntArrayValueImplicit", resolved.autoVarIntArrayValueImplicit, module,
+         kKnownXp2Build.rvaAutoVarIntArrayValueImplicit);
+  logRva("citySerializeSave", resolved.citySerializeSave, module,
+         kKnownXp2Build.rvaCitySerializeSave);
+  logRva("citySerializeLoad", resolved.citySerializeLoad, module,
+         kKnownXp2Build.rvaCitySerializeLoad);
+  logRva("unitSerializeSave", resolved.unitSerializeSave, module,
+         kKnownXp2Build.rvaUnitSerializeSave);
+  logRva("unitSerializeLoad", resolved.unitSerializeLoad, module,
+         kKnownXp2Build.rvaUnitSerializeLoad);
   logRva("handlerRegistryInit", resolved.handlerRegistryInit, module,
          kKnownXp2Build.rvaHandlerRegistryInit);
   logRva("setEffectHandler", resolved.setEffectHandler, module,
          kKnownXp2Build.rvaSetEffectHandler);
   logRva("handlerNodeInsert", resolved.handlerNodeInsert, module,
          kKnownXp2Build.rvaHandlerNodeInsert);
-  logMessageF(1, "handler data: profiledHandlerData=%p profiledHandlerTable=%p",
-              resolved.profiledHandlerData, resolved.profiledHandlerTable);
+  logDebugF("handler data: profiledHandlerData=%p profiledHandlerTable=%p",
+            resolved.profiledHandlerData, resolved.profiledHandlerTable);
   logRva("profiledHandlerAnalyze", resolved.profiledHandlerAnalyze, module,
          kKnownXp2Build.rvaProfiledHandlerAnalyze);
   logRva("profiledHandlerApply", resolved.profiledHandlerApply, module,
@@ -448,6 +570,23 @@ void publishEngineApi(const GameCoreApi& api) {
   engine.changeYieldModifier = api.changeYieldModifier;
   engine.cityCalculateYield = api.cityCalculateYield; // added in v7
   engine.trackedValueAddStep = api.trackedValueAddStep; // added in v8
+  engine.cityConstructor = api.cityConstructor;               // added in v10
+  engine.unitConstructor = api.unitConstructor;               // added in v10
+  engine.autoVariableRegister = api.autoVariableRegister;     // added in v10
+  engine.engineAlignedMalloc = api.mallocTemp;                // added in v10
+  engine.engineAlignedFree = api.engineAlignedFree;           // added in v10
+  engine.autoVarLookupById = api.autoVarLookupById;           // added in v11
+  engine.autoVarRegisterById = api.autoVarRegisterById;       // added in v11
+  engine.autoVarRecordCreate = api.autoVarRecordCreate;       // added in v11
+  engine.autoVarRecordSetName = api.autoVarRecordSetName;     // added in v11
+  engine.autoVarIntValueExplicit = api.autoVarIntValueExplicit;               // added in v12
+  engine.autoVarIntValueImplicit = api.autoVarIntValueImplicit;               // added in v12
+  engine.autoVarIntArrayValueExplicit = api.autoVarIntArrayValueExplicit;     // added in v12
+  engine.autoVarIntArrayValueImplicit = api.autoVarIntArrayValueImplicit;     // added in v12
+  engine.citySerializeSave = api.citySerializeSave;                           // added in v13
+  engine.citySerializeLoad = api.citySerializeLoad;                           // added in v13
+  engine.unitSerializeSave = api.unitSerializeSave;                           // added in v13
+  engine.unitSerializeLoad = api.unitSerializeLoad;                           // added in v13
   engine.getPlayer = api.getPlayerByIndex;
   engine.getGameManager = api.getGameManager;
   g_engineApi = engine;
@@ -500,6 +639,53 @@ std::wstring logFilePath() {
   return fallback.empty() ? std::wstring{} : fallback + L"\\YKKZ000_loader.log";
 }
 
+// Parses YKKZ000_LOG_LEVEL ("TRACE"/"DEBUG"/"INFO"/"WARNING"/"ERROR"/"FATAL", case-insensitive, or
+// "0".."5"); unknown text yields kTrace so the caller clamps it to kCompileMinLevel.
+bridge::LogLevel parseLogLevelName(const char* text) {
+  if (text == nullptr || text[0] == '\0') {
+    return bridge::LogLevel::kTrace;
+  }
+  if (text[1] == '\0' && text[0] >= '0' && text[0] <= '5') {
+    return static_cast<bridge::LogLevel>(text[0] - '0');
+  }
+  constexpr const char* kNames[] = {"TRACE", "DEBUG",   "INFO",
+                                    "WARNING", "ERROR", "FATAL"};
+  for (int level = 0; level <= 5; ++level) {
+    const char* name = kNames[level];
+    int i = 0;
+    for (;; ++i) {
+      if (name[i] == '\0' || text[i] == '\0') {
+        if (name[i] == '\0' && text[i] == '\0') {
+          return static_cast<bridge::LogLevel>(level);
+        }
+        break;
+      }
+      char c = text[i];
+      if (c >= 'a' && c <= 'z') {
+        c = static_cast<char>(c - 'a' + 'A');
+      }
+      if (c != name[i]) {
+        break;
+      }
+    }
+  }
+  return bridge::LogLevel::kTrace;
+}
+
+// Runtime minimum level, resolved once per process and clamped to the compile-time gate.
+int runtimeMinLevel() {
+  static const int level = []() {
+    char value[32] = {};
+    bridge::LogLevel parsed = bridge::LogLevel::kTrace;
+    if (GetEnvironmentVariableA("YKKZ000_LOG_LEVEL", value, sizeof(value)) > 0) {
+      parsed = parseLogLevelName(value);
+    }
+    const bridge::LogLevel compile_min = bridge::kCompileMinLevel;
+    return bridge::ToInt(parsed < compile_min ? compile_min : parsed);
+  }();
+  return level;
+}
+
 } // namespace
 
 std::uint32_t makeHash(const char* text) {
@@ -510,8 +696,14 @@ void logMessage(int level, const char* message) {
   if (message == nullptr) {
     return;
   }
+  if (level < runtimeMinLevel()) {
+    return;
+  }
+  const auto named = (level >= 0 && level <= 5) ? static_cast<bridge::LogLevel>(level)
+                                                : bridge::LogLevel::kTrace;
   char buffer[1024] = {};
-  _snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "[YKKZ000:%d] %s\n", level, message);
+  _snprintf_s(buffer, sizeof(buffer), _TRUNCATE, "[YKKZ000:%s] %s\n",
+              bridge::LogLevelName(named), message);
   const std::size_t length = std::strlen(buffer);
   if (length == 0) {
     return;
@@ -570,33 +762,33 @@ bool ensureGameCoreLoaded() {
   }
   const std::wstring directory = moduleDirectory();
   if (directory.empty()) {
-    logMessage(0, "Unable to determine the loader directory");
+    logError("Unable to determine the loader directory");
     return false;
   }
-  logMessage(1, L"Loader directory: " + directory);
+  logInfo(L"Loader directory: " + directory);
 
   const std::vector<std::wstring> candidates = candidatePaths(directory);
-  logMessage(1, L"Real GameCore candidate path count: " + std::to_wstring(candidates.size()));
+  logInfo(L"Real GameCore candidate path count: " + std::to_wstring(candidates.size()));
   for (const std::wstring& path : candidates) {
     if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-      logMessage(2, L"Candidate does not exist: " + path);
+      logDebug(L"Candidate does not exist: " + path);
       continue;
     }
-    logMessage(1, L"Trying candidate GameCore: " + path);
+    logInfo(L"Trying candidate GameCore: " + path);
     HMODULE module = tryLoadPath(path);
     if (module == nullptr) {
-      logMessage(1, L"Candidate load failed: " + path);
+      logWarn(L"Candidate load failed: " + path);
       continue;
     }
     GameCoreApi resolved;
     if (resolveApi(module, resolved)) {
       g_api = resolved;
       publishEngineApi(resolved);
-      logMessageF(1, "GameCore module=%p base=%p", module, imageBegin(module));
-      logMessage(1, L"Loaded real GameCore: " + path);
+      logDebugF("GameCore module=%p base=%p", module, imageBegin(module));
+      logInfo(L"Loaded real GameCore: " + path);
       return true;
     }
-    logMessage(1, L"Candidate fingerprint/signature mismatch: " + path);
+    logWarn(L"Candidate fingerprint/signature mismatch: " + path);
     FreeLibrary(module);
   }
 
@@ -609,15 +801,15 @@ bool ensureGameCoreLoaded() {
     if (resolveApi(module, resolved)) {
       g_api = resolved;
       publishEngineApi(resolved);
-      logMessageF(1, "GameCore module=%p base=%p", module, imageBegin(module));
-      logMessage(1, std::wstring(L"Loaded real GameCore via DLL search path: ") + buffer);
+      logDebugF("GameCore module=%p base=%p", module, imageBegin(module));
+      logInfo(std::wstring(L"Loaded real GameCore via DLL search path: ") + buffer);
       return true;
     }
     FreeLibrary(module);
   } else if (module == g_selfModule && module != nullptr) {
     FreeLibrary(module);
   }
-  logMessage(0, "Failed to locate the real GameCore");
+  logFatal("Failed to locate the real GameCore");
   return false;
 }
 

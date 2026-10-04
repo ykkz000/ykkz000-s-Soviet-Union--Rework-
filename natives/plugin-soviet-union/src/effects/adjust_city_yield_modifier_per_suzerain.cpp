@@ -10,6 +10,7 @@
 
 #include "city_yield_common.h"
 #include "engine_access.h"
+#include "extra_persistence.h"
 
 // City-yield modifier of "per suzerain city x Amount%" (multiply by suzerain count at read time).
 //
@@ -23,7 +24,7 @@
 // This module installs no hook (prepare = null): the CalculateYield MinHook is owned exclusively by
 // the existing module (the same target must not be hooked twice); side-table cleanup is handled
 // centrally by context events (see adjust_city_yield_per_population_modifier). If the existing module is
-// disabled by YKKZ000_DISABLE_CUSTOM_BEHAVIOR, this effect is not injected either (it depends on
+// disabled by DISABLE_CUSTOM_BEHAVIOR, this effect is not injected either (it depends on
 // the host).
 namespace ykkz000::plugin {
 namespace {
@@ -44,6 +45,9 @@ void ApplyPerSuzerainEntries(void* self, void* city, int sign) {
   }
   constexpr std::int64_t kPercentMin = std::numeric_limits<std::int32_t>::min();
   constexpr std::int64_t kPercentMax = std::numeric_limits<std::int32_t>::max();
+  // Seed from the persisted AutoVariables after a load before the incremental add (see the
+  // per-population module for the rationale).
+  EnsureCityExtraHydrated(city, ref);
   extra::PlayerExtras().EditCity(
       ref.player_id, ref.city_id, ref.player_id, [&](extra::CityExtra& extra) {
         for (const EffectEntry& entry : entries) {
@@ -70,6 +74,7 @@ void ApplyPerSuzerainEntries(void* self, void* city, int sign) {
             extra.yield_count = entry.yield_type + 1;
           }
         }
+        PersistCityValues(city, extra.percent.data(), extra.per_suzerain_percent.data());
       });
   // Same as the existing module: after the side table changes, clear the engine's city-yield cache
   // and send a zero-delta "yield changed" notification, and invalidate the TLS snapshot (EditCity
@@ -110,7 +115,7 @@ const bridge::EffectDesc* Describe(const bridge::Host& host) {
   }
   g_desc.typeName = "EFFECT_YKKZ000_ADJUST_CITY_YIELD_MODIFIER_PER_SUZERAIN";
   g_desc.templateEffect = "EFFECT_ADJUST_CITY_YIELD_MODIFIER";
-#if !defined(YKKZ000_DISABLE_CUSTOM_BEHAVIOR)
+#if !defined(DISABLE_CUSTOM_BEHAVIOR)
   const bridge::EngineApi* engine = host.engine;
   if (engine == nullptr) {
     return nullptr;

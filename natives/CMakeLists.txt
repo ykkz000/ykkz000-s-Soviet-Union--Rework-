@@ -4,15 +4,15 @@ project(YKKZ000Dlls LANGUAGES CXX)
 # Diagnostic bisection switches (off by default; used only to attribute a crash):
 # - Disable the custom behavior path (no implementation supplied at registration; degrades to
 #   template behavior)
-option(YKKZ000_DISABLE_CUSTOM_BEHAVIOR
+option(DISABLE_CUSTOM_BEHAVIOR
   "Do not supply an implementation when registering effects (disables the custom effect path)" OFF)
-option(YKKZ000_DISABLE_EFFECT_HANDLER
+option(DISABLE_EFFECT_HANDLER
   "Disable effect handler registration (the built-in handler table hook)" OFF)
-option(YKKZ000_DISABLE_HANDLER_GUARD
+option(DISABLE_HANDLER_GUARD
   "Disable the handler dispatch guard (for crash reproduction/control only)" OFF)
-option(YKKZ000_ENABLE_DISPATCH_TRACE
+option(ENABLE_DISPATCH_TRACE
   "Enable the 0x979290 generic dispatch trace hook (diagnostic, off by default)" OFF)
-option(YKKZ000_DISABLE_STRENGTH_PER_SUZERAIN
+option(DISABLE_STRENGTH_PER_SUZERAIN
   "Degrade the per-suzerain combat strength effect to template behavior (register the type only, no scaling)" OFF)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -41,6 +41,10 @@ add_library(ykkz000_bridge INTERFACE)
 target_include_directories(ykkz000_bridge INTERFACE
   "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>")
 target_compile_features(ykkz000_bridge INTERFACE cxx_std_20)
+
+# Logging gate: DEBUG/TRACE calls are compiled in only under the standard _DEBUG macro, which the
+# Debug configuration provides (MSVC /MTd). Release/RelWithDebInfo carry zero logging overhead. No
+# compile definition is propagated: _DEBUG is toolchain-provided.
 
 add_subdirectory(third_party/minhook)
 add_subdirectory(loader)

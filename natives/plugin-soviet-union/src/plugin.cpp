@@ -3,6 +3,7 @@
 
 #include "effects/effect_modules.h"
 #include "effects/engine_access.h"
+#include "effects/extra_persistence.h"
 
 // Strategy layer of the Soviet Union mod: registers the custom EffectTypes with the Loader and
 // forwards context events to each effect module.
@@ -11,10 +12,18 @@
 namespace {
 
 void OnGameContext(ykkz000::bridge::GameContextEvent event, void* context) {
+  if (event == ykkz000::bridge::GameContextEvent::kCreated) {
+    // Install the AutoVariable persistence hooks before any City/Unit is constructed in the new
+    // context; the effect modules then mirror/hydrate their side tables through them.
+    (void)ykkz000::plugin::EnsurePersistenceHooks();
+  }
   for (const ykkz000::plugin::EffectModule* module : ykkz000::plugin::AllEffectModules()) {
     if (module->on_context != nullptr) {
       module->on_context(event, context);
     }
+  }
+  if (event == ykkz000::bridge::GameContextEvent::kDestroyed) {
+    ykkz000::plugin::ShutdownPersistence();
   }
 }
 
@@ -52,5 +61,6 @@ YKKZ000_PLUGIN_API void DestroyPlugin() {
       module->shutdown();
     }
   }
+  ykkz000::plugin::ResetPersistenceForUnload();
   ykkz000::plugin::SetContext(nullptr);
 }

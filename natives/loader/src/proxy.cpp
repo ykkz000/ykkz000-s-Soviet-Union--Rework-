@@ -60,7 +60,7 @@ bool initialize() {
   {
     LogScope s("resolve real GameCore");
     if (!ensureGameCoreLoaded()) {
-      logMessage(0, "Initialization failed: real GameCore unavailable");
+      logFatal("Initialization failed: real GameCore unavailable");
       return false;
     }
   }
@@ -76,7 +76,7 @@ bool initialize() {
         GetProcAddress(api.module, "EXP_GetTelemetrySessionHash"));
   }
   if (g_realCreate == nullptr) {
-    logMessage(0, "Initialization failed: could not resolve real DllCreateGameContext");
+    logFatal("Initialization failed: could not resolve real DllCreateGameContext");
     return false;
   }
 
@@ -84,7 +84,7 @@ bool initialize() {
   // so that the built-in handler tables constructed while the game context is created are captured
   // and custom effects are re-registered.
   const bool handlerHookReady = installEffectHandlerHook();
-  logMessageF(1, "effect handler hook ready=%d", handlerHookReady ? 1 : 0);
+  logInfoF("effect handler hook ready=%d", handlerHookReady ? 1 : 0);
 
   {
     LogScope s("build host interface");

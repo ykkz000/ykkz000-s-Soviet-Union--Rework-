@@ -31,7 +31,7 @@ extern "C" const char* ykkz000_GetTypeName(void* self) {
   const auto hash = TryReadOr(self, &civ6::ModifierEffectFactory::type_hash, std::uint32_t{0});
   static std::atomic<bool> s_logged{false};
   if (!s_logged.exchange(true)) {
-    logMessageF(1, "getname: first call self=%p hash=0x%08X", self, hash);
+    logDebugF("getname: first call self=%p hash=0x%08X", self, hash);
   }
 
   std::lock_guard<std::mutex> guard(g_typeNamesMutex);
@@ -60,8 +60,8 @@ void* cloneFactoryVTable(void* templateFactory) {
   if (source == nullptr) {
     return nullptr;
   }
-  logMessageF(1, "clone: template=%p source vtable=%p slots=%zu", templateFactory, source,
-              civ6::kFactoryVTableSlots);
+  logDebugF("clone: template=%p source vtable=%p slots=%zu", templateFactory, source,
+            civ6::kFactoryVTableSlots);
   const std::size_t slots = civ6::kFactoryVTableSlots;
   auto* block = static_cast<void**>(
       HeapAlloc(GetProcessHeap(), 0, sizeof(void*) * (slots + civ6::kVTableRttiPrefixSlots)));
@@ -73,8 +73,8 @@ void* cloneFactoryVTable(void* templateFactory) {
 
   void** vtable = block + civ6::kVTableRttiPrefixSlots; // the vptr handed back to the engine and callers
   vtable[civ6::kFactoryTypeNameSlot] = reinterpret_cast<void*>(&ykkz000_GetTypeName);
-  logMessageF(1, "clone: block=%p vtable=%p nameSlot=%zX rtti=%p", block, vtable,
-              civ6::kFactoryTypeNameSlot, block[0]);
+  logDebugF("clone: block=%p vtable=%p nameSlot=%zX rtti=%p", block, vtable,
+            civ6::kFactoryTypeNameSlot, block[0]);
   return vtable;
 }
 

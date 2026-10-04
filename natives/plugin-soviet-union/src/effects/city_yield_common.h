@@ -70,14 +70,23 @@ void NotifyCityYieldChanged(void* city, int yield_type);
 void InvalidateAndNotifyCityYield(void* city, const std::vector<EffectEntry>& entries);
 
 /// @brief Read-path TLS snapshot: consecutive lookups of the same key hit directly; on a miss it
-///        queries the table and backfills as needed.
-/// @param[in] player_id Player id.
-/// @param[in] city_id City id.
+///        queries the table, attempts a one-time hydration from the city's persisted AutoVariables
+///        (see extra_persistence.h), and caches the outcome (including a negative result).
+/// @param[in] city City instance (used only to locate the persisted AutoVariables on a miss).
+/// @param[in] ref Side-table key resolved from the city.
 /// @return Side-table entry pointer on hit, nullptr when there is no entry.
-/// @note Uses the side-table key (player id + city id) as the cache identity to avoid keying on
-///       the city pointer.
-[[nodiscard]] const extra::CityExtra* LookupCityExtra(std::int32_t player_id,
-                                                      std::int32_t city_id);
+/// @note The cache identity is the side-table key (player id + city id, not the city pointer); a
+///       write (Apply/Remove) bumps the generation and invalidates the negative cache.
+[[nodiscard]] const extra::CityExtra* LookupCityExtraForCity(void* city, const CityRef& ref);
+
+/// @brief Seeds the side-table entry from the city's persisted AutoVariables when the entry does
+///        not exist yet (e.g. right after a savegame load, where the engine does not replay Apply).
+/// @param[in] city City instance.
+/// @param[in] ref Side-table key resolved from the city.
+/// @note No-op when persistence is inactive or the table entry already exists. Call before the
+///       first EditCity of a city (in the read path and before Apply/Remove) so a later incremental
+///       Apply adds on top of the restored values instead of resetting them.
+void EnsureCityExtraHydrated(void* city, const CityRef& ref);
 
 /// @brief Post-write side-table invalidation: bumps the write generation (invalidating all
 ///        threads' TLS snapshots) and clears this thread's TLS.
