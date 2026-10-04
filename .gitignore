@@ -4,6 +4,10 @@
 # Logs
 *.log
 
+# Native build artifacts (CMake build tree + vcpkg manifest installs)
+natives/build/
+natives/vcpkg_installed/
+
 # Agents
 .kilo/*
 .cline

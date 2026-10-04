@@ -37,7 +37,13 @@
 - 《文明 VI》SDK 与 SDK Assets。默认使用 Steam 默认路径，可用 `--base-sdk` / `--base-assets` 覆盖：
   - `...\steamapps\common\Sid Meier's Civilization VI SDK`
   - `...\steamapps\common\Sid Meier's Civilization VI SDK Assets`
-- MinHook 已随仓库内置（`natives/third_party/minhook`），无需额外获取。
+- vcpkg（清单模式），用于获取第三方库（MinHook 与 Apache log4cxx 及其传递依赖）。克隆并引导 vcpkg，然后设置 `VCPKG_ROOT`：
+  ```powershell
+  git clone https://github.com/microsoft/vcpkg C:\vcpkg
+  & C:\vcpkg\bootstrap-vcpkg.bat
+  [Environment]::SetEnvironmentVariable('VCPKG_ROOT', 'C:\vcpkg', 'User')
+  ```
+  清单 `natives/vcpkg.json` 会在 CMake 配置时自动安装依赖（到 `natives/build/vcpkg_installed`）。默认 triplet 为 `x64-windows-static`（静态 CRT，与 `/MT` 一致），因此不会向模组目录部署额外的运行时 DLL。可用 `--vcpkg-root <path>` / `--vcpkg-triplet <triplet>` 覆盖默认值。
 
 ## 从源码构建
 

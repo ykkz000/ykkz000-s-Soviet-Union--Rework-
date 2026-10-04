@@ -36,6 +36,18 @@ foreach(cfg DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
   set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${cfg} "${CMAKE_BINARY_DIR}/bin")
 endforeach()
 
+# Third-party libraries are managed by vcpkg (manifest mode); the vcpkg toolchain resolves the
+# imported targets. See natives/vcpkg.json.
+find_package(minhook CONFIG REQUIRED)
+# log4cxx's exported config references EXPAT::EXPAT, while the vcpkg expat port exports the target
+# as expat::expat. Provide the expected name before resolving log4cxx.
+find_package(expat CONFIG REQUIRED)
+if(NOT TARGET EXPAT::EXPAT)
+  add_library(EXPAT::EXPAT INTERFACE IMPORTED)
+  set_target_properties(EXPAT::EXPAT PROPERTIES INTERFACE_LINK_LIBRARIES expat::expat)
+endif()
+find_package(log4cxx CONFIG REQUIRED)
+
 # Shared headers: INTERFACE target, propagates the include directory through linking
 add_library(ykkz000_bridge INTERFACE)
 target_include_directories(ykkz000_bridge INTERFACE
@@ -46,6 +58,5 @@ target_compile_features(ykkz000_bridge INTERFACE cxx_std_20)
 # Debug configuration provides (MSVC /MTd). Release/RelWithDebInfo carry zero logging overhead. No
 # compile definition is propagated: _DEBUG is toolchain-provided.
 
-add_subdirectory(third_party/minhook)
 add_subdirectory(loader)
 add_subdirectory(plugin-soviet-union)

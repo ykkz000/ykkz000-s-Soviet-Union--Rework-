@@ -17,7 +17,7 @@ BEGIN
             VALUE "FileDescription",  "GameCore proxy loader for ykkz000's Soviet Union (Rework)\0"
             VALUE "FileVersion",      "1.0.0.0\0"
             VALUE "InternalName",     "GameCore_YKKZ000_Loader_XP2\0"
-            VALUE "LegalCopyright",   "Copyright (C) 2026 ykkz000. Includes MinHook (C) 2009-2017 Tsuda Kageyu and Hacker Disassembler Engine (C) 2008-2009 Vyacheslav Patkov, both BSD 2-Clause.\0"
+            VALUE "LegalCopyright",   "Copyright (C) 2026 ykkz000. Includes MinHook (C) 2009-2017 Tsuda Kageyu and Hacker Disassembler Engine (C) 2008-2009 Vyacheslav Patkov (BSD 2-Clause), and Apache log4cxx / APR / APR-util (Apache-2.0) and Expat (MIT).\0"
             VALUE "OriginalFilename", "GameCore_YKKZ000_Loader_XP2.dll\0"
             VALUE "ProductName",      "ykkz000's Soviet Union (Rework)\0"
             VALUE "ProductVersion",   "1.0.0.0\0"

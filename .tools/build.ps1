@@ -56,6 +56,11 @@ Options:
                             Default: <projectDir>\natives
   --dll-generator <gen>     CMake generator for the DLL build.
                             Default: the CMake default (Visual Studio).
+  --vcpkg-root <path>       vcpkg installation root used to resolve the
+                            manifest dependencies (minhook, log4cxx).
+                            Default: the VCPKG_ROOT environment variable.
+  --vcpkg-triplet <t>       vcpkg target triplet for the DLL dependencies.
+                            Default: x64-windows-static
   --dll-prefix <name>       Deployed loader DLL prefix; must match the
                             DllPrefix in Data/YKKZ000_GameCores.sql.
                             Default: GameCore_YKKZ000_Loader_XP2
@@ -83,6 +88,7 @@ Examples:
   .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --skip=art,dll
   .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --force-rebuild=dll --cmake-arg=-DDISABLE_STRENGTH_PER_SUZERAIN=ON
   .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --debug
+  .\build.ps1 "ykkz000's Soviet Union (Rework).civ6proj" --vcpkg-root C:\vcpkg
 "@
 }
 
@@ -129,6 +135,8 @@ function Parse-Args {
     Debug        = $false
     NoDebug      = $false
     DllGenerator = $null
+    VcpkgRoot    = $env:VCPKG_ROOT
+    VcpkgTriplet = 'x64-windows-static'
     Help         = $false
   }
 
@@ -303,6 +311,32 @@ function Parse-Args {
       $opts.DllGenerator = $v
       $i++
     }
+    elseif ($a -eq '--vcpkg-root') {
+      if ($i + 1 -ge $ArgList.Count) { throw "Option '$a' requires a value." }
+      $v = $ArgList[$i + 1]
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '$a' requires a value." }
+      $opts.VcpkgRoot = $v
+      $i += 2
+    }
+    elseif ($a -like '--vcpkg-root=*') {
+      $v = $a.Substring('--vcpkg-root='.Length)
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '--vcpkg-root' requires a value." }
+      $opts.VcpkgRoot = $v
+      $i++
+    }
+    elseif ($a -eq '--vcpkg-triplet') {
+      if ($i + 1 -ge $ArgList.Count) { throw "Option '$a' requires a value." }
+      $v = $ArgList[$i + 1]
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '$a' requires a value." }
+      $opts.VcpkgTriplet = $v
+      $i += 2
+    }
+    elseif ($a -like '--vcpkg-triplet=*') {
+      $v = $a.Substring('--vcpkg-triplet='.Length)
+      if ([string]::IsNullOrEmpty($v)) { throw "Option '--vcpkg-triplet' requires a value." }
+      $opts.VcpkgTriplet = $v
+      $i++
+    }
     elseif ($a -eq '-d' -or $a -eq '--debug') {
       $opts.Debug = $true
       $i++
@@ -449,6 +483,8 @@ function Assert-Inputs {
   }
 
   $cmake = $null
+  $vcpkgToolchain = $null
+  $vcpkgTriplet = $opts.VcpkgTriplet
   if (-not $skipDll) {
     if (-not (Test-Path -LiteralPath $dllDir -PathType Container)) {
       throw "DLL source directory not found: $dllDir"
@@ -457,6 +493,21 @@ function Assert-Inputs {
       throw "CMakeLists.txt was not found in the DLL source directory: $dllDir"
     }
     $cmake = Resolve-CMakePath -Explicit $opts.CMake
+
+    if ([string]::IsNullOrWhiteSpace($opts.VcpkgRoot)) {
+      throw "vcpkg was not found. Set the VCPKG_ROOT environment variable (clone vcpkg and run bootstrap-vcpkg.bat) or pass --vcpkg-root <path>."
+    }
+    $vcpkgRoot = Remove-TrailingSeparator (Resolve-FullPath $opts.VcpkgRoot)
+    if (-not (Test-Path -LiteralPath $vcpkgRoot -PathType Container)) {
+      throw "vcpkg root not found: $vcpkgRoot"
+    }
+    $vcpkgToolchain = Join-Path (Join-Path $vcpkgRoot 'scripts\buildsystems') 'vcpkg.cmake'
+    if (-not (Test-Path -LiteralPath $vcpkgToolchain -PathType Leaf)) {
+      throw "The vcpkg CMake toolchain was not found: $vcpkgToolchain (check --vcpkg-root)."
+    }
+    if ([string]::IsNullOrWhiteSpace($vcpkgTriplet)) {
+      throw "The vcpkg triplet must not be empty."
+    }
   }
 
   return [pscustomobject]@{
@@ -481,6 +532,8 @@ function Assert-Inputs {
     DllPrefix    = $dllPrefix
     DllConfig    = $dllConfig
     DllGenerator = $dllGenerator
+    VcpkgToolchain = $vcpkgToolchain
+    VcpkgTriplet = $vcpkgTriplet
   }
 }
 
@@ -646,6 +699,8 @@ function Invoke-DllBuild {
     [string]$BuildDir,
     [string]$Config,
     [string]$Generator,
+    [string]$ToolchainFile,
+    [string]$Triplet,
     [string[]]$CMakeArgs = @()
   )
 
@@ -674,6 +729,12 @@ function Invoke-DllBuild {
   $isMultiConfig = [string]::IsNullOrWhiteSpace($Generator) -or $Generator -like 'Visual Studio*'
   $configureArgs = @()
   if (-not $isMultiConfig) { $configureArgs += "-DCMAKE_BUILD_TYPE=$Config" }
+  if (-not [string]::IsNullOrWhiteSpace($ToolchainFile)) {
+    $configureArgs += "-DCMAKE_TOOLCHAIN_FILE=$ToolchainFile"
+  }
+  if (-not [string]::IsNullOrWhiteSpace($Triplet)) {
+    $configureArgs += "-DVCPKG_TARGET_TRIPLET=$Triplet"
+  }
 
   Write-Host ("Configuring the DLL build in {0}" -f $BuildDir)
   & $CMake -S $DllDir -B $BuildDir @generatorArgs @configureArgs @CMakeArgs
@@ -1171,7 +1232,7 @@ function Main {
 
   $dllFiles = @()
   if (-not $ctx.SkipDll) {
-    Invoke-DllBuild -CMake $ctx.CMake -DllDir $ctx.DllDir -BuildDir $ctx.DllBuildDir -Config $ctx.DllConfig -Generator $ctx.DllGenerator -CMakeArgs $ctx.CMakeArgs
+    Invoke-DllBuild -CMake $ctx.CMake -DllDir $ctx.DllDir -BuildDir $ctx.DllBuildDir -Config $ctx.DllConfig -Generator $ctx.DllGenerator -ToolchainFile $ctx.VcpkgToolchain -Triplet $ctx.VcpkgTriplet -CMakeArgs $ctx.CMakeArgs
     $dllFiles = @(Copy-DllArtifacts -Ctx $ctx)
   }
   else {

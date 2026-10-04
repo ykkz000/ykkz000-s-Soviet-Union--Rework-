@@ -174,6 +174,15 @@ void logMessage(int level, const std::wstring& message);
 /// @param[in] ... Format arguments.
 void logMessageF(int level, const char* format, ...);
 
+// logging.cpp
+/// @brief Initialize the log4cxx backend (idempotent). Must be called outside DllMain; the first
+///        log call also triggers it, so even pre-initialization log lines reach the file.
+void initializeLogging();
+/// @brief Resolve the log file path (Known Folder Logs directory, falling back to the Loader
+///        directory).
+/// @return Absolute log file path, or an empty string when no directory could be resolved.
+[[nodiscard]] std::wstring logFilePath();
+
 // -- Level wrappers --
 // Zero-overhead level macros. TRACE is never used; DEBUG is compiled out entirely unless
 // _DEBUG is defined (so its formatting arguments are not evaluated). INFO and above always

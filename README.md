@@ -37,7 +37,13 @@ Supported languages: English, 简体中文.
 - *Civilization VI* SDK and SDK Assets. The default Steam paths are used unless overridden with `--base-sdk` / `--base-assets`:
   - `...\steamapps\common\Sid Meier's Civilization VI SDK`
   - `...\steamapps\common\Sid Meier's Civilization VI SDK Assets`
-- MinHook is bundled in the repository (`natives/third_party/minhook`) and does not need to be obtained separately.
+- vcpkg (manifest mode), used to obtain the third-party libraries (MinHook and Apache log4cxx with its transitive dependencies). Clone and bootstrap vcpkg, then set `VCPKG_ROOT`:
+  ```powershell
+  git clone https://github.com/microsoft/vcpkg C:\vcpkg
+  & C:\vcpkg\bootstrap-vcpkg.bat
+  [Environment]::SetEnvironmentVariable('VCPKG_ROOT', 'C:\vcpkg', 'User')
+  ```
+  The manifest `natives/vcpkg.json` installs the dependencies automatically during the CMake configure (into `natives/build/vcpkg_installed`). The default triplet is `x64-windows-static` (static CRT, matching `/MT`), so no extra runtime DLLs are deployed next to the mod. Use `--vcpkg-root <path>` / `--vcpkg-triplet <triplet>` to override the defaults.
 
 ## Building from Source
 

@@ -117,6 +117,10 @@ bool initialize() {
 } // namespace
 
 void initializeLoaderOnce() {
+  // Configure the log4cxx backend before any LogScope so the startup lines reach the log file.
+  // logMessage() also initializes lazily, covering exported entry points whose LogScope runs
+  // before this function (for example createGameContext).
+  initializeLogging();
   LogScope scope("initialize loader");
   std::call_once(g_initOnce, []() { g_initialized = initialize(); });
 }
