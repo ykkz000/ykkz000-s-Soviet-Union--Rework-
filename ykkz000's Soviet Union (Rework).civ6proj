@@ -23,6 +23,10 @@
     <AssociationData><![CDATA[<Associations>
   <Block type="Mod" title="ykkz000's Soviet Union" id="9ed0d5f8-9d0e-4768-ae28-b422ee46b5c3" />
 </Associations>]]></AssociationData>
+    <DependencyData><![CDATA[<Dependencies>
+  <Mod id="9e4ee2f0-c9d2-4eb4-8b38-b698411da023" title="LOC_MOD_YKKZ000_DLL_PLUGIN_LOADER_NAME" />
+  <Mod id="02eb8617-3ce5-446f-b671-93943b8cbac2" title="LOC_MOD_YKKZ000_DLL_PLUGIN_API_NAME" />
+</Dependencies>]]></DependencyData>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Default' ">
     <OutputPath>.</OutputPath>
