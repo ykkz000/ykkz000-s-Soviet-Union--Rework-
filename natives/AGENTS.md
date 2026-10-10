@@ -2,11 +2,12 @@
 
 ## 1. 项目概述
 
-本子项目是一个使用C++为ykkz000's Soviet Union (Rework)项目提供更深层次功能的项目，通过构建Plugin DLL提供扩展功能，并构建Loader DLL
-加载原版GameCore DLL（`GameCore_XP2_FinalRelease.dll`）以及Plugin DLL以实现在《文明6》中提供类似原生实现的功能。
+本子项目是一个使用C++为ykkz000's Soviet Union (Rework)项目提供更深层次功能的项目，通过构建单个 consumer Plugin DLL（`Plugin_YKKZ000_Soviet_Union`）提供扩展功能，在《文明6》中提供类似原生实现的功能。
+
+Loader 与共享 Plugin API 已迁出为独立模组：Loader 见 `ykkz000's DLL Plugin Loader`，共享 API（EffectType / 持久化）见 `ykkz000's DLL Plugin API`。本仓库仅保留 consumer 插件与玩法/美术/文本内容。
 
 - **技术栈**: C++, MSVC, Hook, CMake, vcpkg
-- **架构**: DLL，游戏模组（无法独立运行，需要在游戏内加载）
+- **架构**: 插件 DLL，游戏模组（无法独立运行，需要在游戏内加载）
 
 ## 2. 项目目录
 
@@ -63,11 +64,11 @@
 - 扩展数据结构**必须**命名为`<Civ6数据结构名称>Extra`，如扩展`Player`信息的扩展数据结构命名为`PlayerExtra`
 - 对于希望为包含指向B数据结构的A数据结构提供B扩展数据结构，则需要同时实现AExtra和BExtra，在AExtra中以原版映射方式（一对一、一对多、多对一、多对多）组织指向BExtra的字段（使用指针）
 
-#### Loader 代码规范
+#### 共享 ABI 头文件与 API 头文件
 
-- Loader**必须**始终保持与游戏的GameCore DLL在游戏中被调用时的兼容性
-- Loader**必须**加载游戏的GameCore DLL，并在此基础上应用插件的修改，**禁止**直接替代游戏引擎
-- Loader**禁止**实现与修改游戏玩法相关的逻辑，与游戏玩法相关的逻辑均由插件修改
+- `natives/include/ykkz000/bridge/**`、`export.h`、`natives/include/ykkz000/civ6/**` 是共享 ABI 头文件的**副本**，权威源为 `ykkz000's DLL Plugin Loader` 仓库；变更时需同步。
+- `natives/include/ykkz000/plugin/**`（API 头）是本仓库内置的**副本**，权威源为 `ykkz000's DLL Plugin API` 仓库；变更时需同步。
+- `natives/vendor/plugin_api/*.def` 同样是来自 API 仓库的副本，用于在链接期生成 API 导入库。
 
 #### Plugin 代码规范
 
@@ -82,13 +83,7 @@
 - 初始化遵循**两阶段**：先加载全部候选DLL，再按拓扑序调用`GetPlugin`；因此依赖插件（如 API 插件）先初始化，consumer 后初始化
 - 卸载按**逆拓扑序**：consumer 先卸载，其依赖的 API 插件后卸载
 - 插件**必须**保持向后兼容：`PluginManifest`仅可追加字段，已发布字段的含义**禁止**更改
-
-##### API 插件规范
-
-- 共享插件 API（如`ykkz000_plugin_api_effecttype`、`ykkz000_plugin_api_persistence`）本身是插件：它们导出`GetPlugin`/`DestroyPlugin`/`GetPluginManifest`，由Loader 作为插件初始化以捕获`Host`
-- API 插件**禁止**包含与游戏玩法相关的具体逻辑；它们只提供通用的、与玩法无关的服务（如引擎访问、持久化、生命周期通知）
-- API 通过C-ABI的版本化入口导出（如`GetEffectTypeApi(uint32)`、`GetPersistenceApi(uint32)`），返回**只增不改**的POD函数表；**禁止**跨DLL边界传递STL类型、异常或由分配器拥有的对象
-- consumer **必须**在清单中声明对 API 插件的依赖，使其先于自身初始化，并直接`import` API入口函数
+- consumer **必须**在清单中声明对 API 插件的依赖（`ykkz000.api.effecttype`、`ykkz000.api.persistence`），使它们先于自身初始化，并直接`import` API入口函数
 
 ##### EffectType 定义代码规范
 

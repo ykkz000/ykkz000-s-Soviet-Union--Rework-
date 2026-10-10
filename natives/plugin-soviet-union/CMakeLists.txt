@@ -16,11 +16,14 @@ set_target_properties(YKKZ000SovietUnionPlugin PROPERTIES
 
 target_include_directories(YKKZ000SovietUnionPlugin PRIVATE include)
 
-# ykkz000_plugin_api aggregates the two API plugins: it propagates their include directories and
-# import libraries, so the consumer's imports of GetEffectTypeApi/GetPersistenceApi resolve at link
-# time and the OS resolves the DLLs at load time (the loader puts the plugin directory on the search
-# path).
+# ykkz000_plugin_api aggregates the shared API headers and the import libraries generated from the
+# vendored API .def files (see natives/CMakeLists.txt), so the consumer's imports of
+# GetEffectTypeApi/GetPersistenceApi resolve at link time and the OS resolves the DLLs at load time
+# (the loader puts the plugin directory on the search path).
 target_link_libraries(YKKZ000SovietUnionPlugin PRIVATE ykkz000_bridge ykkz000_plugin_api)
+
+# Ensure the import libraries are generated before the consumer is linked.
+add_dependencies(YKKZ000SovietUnionPlugin ykkz000_plugin_api_implibs)
 
 if(DISABLE_CUSTOM_BEHAVIOR)
   target_compile_definitions(YKKZ000SovietUnionPlugin PRIVATE DISABLE_CUSTOM_BEHAVIOR)

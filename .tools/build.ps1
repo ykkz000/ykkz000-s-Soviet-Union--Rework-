@@ -1,20 +1,15 @@
 #Requires -Version 5.1
 
 # --- DLL build and deployment conventions ---
-# The loader is produced by natives/loader (OUTPUT_NAME equals $LoaderBuildDll) and is
-# deployed as <DllPrefix>_FinalRelease.dll. The plugin is produced by natives/plugin-soviet-union and
-# is deployed into the dedicated directory scanned by the loader. DllPrefix must match
-# the DllPrefix used in Data/YKKZ000_GameCores.sql.
-$LoaderTarget     = 'YKKZ000Loader'
-$PluginTargets    = @('YKKZ000SovietUnionPlugin', 'YKKZ000PluginApiEffectType', 'YKKZ000PluginApiPersistence')
-$LoaderBuildDll   = 'GameCore_YKKZ000_Loader_XP2.dll'
-# Deployed plugin DLLs: the Soviet Union consumer plus the two shared API plugins. All are copied into
-# the single loader-scanned plugin directory (the loader resolves the consumer's imports from there).
-$PluginDlls       = @(
-  'Plugin_YKKZ000_Soviet_Union.dll',
-  'ykkz000_plugin_api_effecttype.dll',
-  'ykkz000_plugin_api_persistence.dll'
-)
+# Parameterized driver shared by the ykkz000 mod repos. Only the targets listed here are built and
+# deployed; set $LoaderTarget/$LoaderBuildDll to $null in a repo that ships no loader.
+#
+# Consumer repo: builds the Soviet Union plugin and deploys it into the loader-scanned plugin
+# directory. No loader is produced here (it is provided by ykkz000's DLL Plugin Loader).
+$LoaderTarget     = $null
+$LoaderBuildDll   = $null
+$PluginTargets    = @('YKKZ000SovietUnionPlugin')
+$PluginDlls       = @('Plugin_YKKZ000_Soviet_Union.dll')
 $DeployBinRel     = 'Binaries/Win64'
 $DeployPluginRel  = 'Binaries/Win64/ykkz000_civ6_plugin'
 $DefaultDllPrefix = 'GameCore_YKKZ000_Loader_XP2'
@@ -748,7 +743,7 @@ function Invoke-DllBuild {
     throw "CMake configuration failed (exit $LASTEXITCODE)."
   }
 
-  $allTargets = @($LoaderTarget) + $PluginTargets
+  $allTargets = @(@($LoaderTarget) + $PluginTargets | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
   Write-Host ("Building DLL targets: {0}" -f ($allTargets -join ', '))
   & $CMake --build $BuildDir --config $Config --target $allTargets
   if ($LASTEXITCODE -ne 0) {
@@ -776,21 +771,23 @@ function Find-DllArtifact {
 function Copy-DllArtifacts {
   param($Ctx)
 
-  $binDir = Join-Path $Ctx.Out $DeployBinRel
-  $pluginDir = Join-Path $Ctx.Out $DeployPluginRel
-  New-Item -ItemType Directory -Path $binDir -Force -ErrorAction Stop | Out-Null
-  New-Item -ItemType Directory -Path $pluginDir -Force -ErrorAction Stop | Out-Null
-
-  $loaderSrc = Find-DllArtifact -BuildDir $Ctx.DllBuildDir -Config $Ctx.DllConfig -FileName $LoaderBuildDll
-  $loaderName = $Ctx.DllPrefix + '_FinalRelease.dll'
-  $loaderDst = Join-Path $binDir $loaderName
-  if (-not (Test-PathUnder $loaderDst $Ctx.Out)) {
-    throw "The loader deploy path escapes the output directory: $loaderDst"
-  }
-  Copy-Item -LiteralPath $loaderSrc -Destination $loaderDst -Force -ErrorAction Stop
-
   $deployed = New-Object System.Collections.Generic.List[string]
-  $deployed.Add($DeployBinRel + '/' + $loaderName)
+
+  if (-not [string]::IsNullOrWhiteSpace($LoaderBuildDll)) {
+    $binDir = Join-Path $Ctx.Out $DeployBinRel
+    New-Item -ItemType Directory -Path $binDir -Force -ErrorAction Stop | Out-Null
+    $loaderSrc = Find-DllArtifact -BuildDir $Ctx.DllBuildDir -Config $Ctx.DllConfig -FileName $LoaderBuildDll
+    $loaderName = $Ctx.DllPrefix + '_FinalRelease.dll'
+    $loaderDst = Join-Path $binDir $loaderName
+    if (-not (Test-PathUnder $loaderDst $Ctx.Out)) {
+      throw "The loader deploy path escapes the output directory: $loaderDst"
+    }
+    Copy-Item -LiteralPath $loaderSrc -Destination $loaderDst -Force -ErrorAction Stop
+    $deployed.Add($DeployBinRel + '/' + $loaderName)
+  }
+
+  $pluginDir = Join-Path $Ctx.Out $DeployPluginRel
+  New-Item -ItemType Directory -Path $pluginDir -Force -ErrorAction Stop | Out-Null
 
   foreach ($dll in $PluginDlls) {
     $pluginSrc = Find-DllArtifact -BuildDir $Ctx.DllBuildDir -Config $Ctx.DllConfig -FileName $dll
@@ -809,9 +806,10 @@ function Get-DeployedDllFiles {
   param($Ctx)
 
   $result = New-Object System.Collections.Generic.List[string]
-  $candidates = @(
-    ($DeployBinRel + '/' + ($Ctx.DllPrefix + '_FinalRelease.dll'))
-  )
+  $candidates = @()
+  if (-not [string]::IsNullOrWhiteSpace($LoaderBuildDll)) {
+    $candidates += ($DeployBinRel + '/' + ($Ctx.DllPrefix + '_FinalRelease.dll'))
+  }
   foreach ($dll in $PluginDlls) {
     $candidates += ($DeployPluginRel + '/' + $dll)
   }
@@ -1249,8 +1247,10 @@ function Main {
   }
   else {
     $dllFiles = @(Get-DeployedDllFiles -Ctx $ctx)
-    if ($dllFiles.Count -lt (1 + $PluginDlls.Count)) {
-      throw "Option '--skip=dll' was given, but the expected loader and plugin DLLs were not all found in '$($ctx.Out)'. Build once without '--skip=dll' first."
+    $expectedDlls = $PluginDlls.Count
+    if (-not [string]::IsNullOrWhiteSpace($LoaderBuildDll)) { $expectedDlls += 1 }
+    if ($dllFiles.Count -lt $expectedDlls) {
+      throw "Option '--skip=dll' was given, but the expected DLLs were not all found in '$($ctx.Out)'. Build once without '--skip=dll' first."
     }
   }
 

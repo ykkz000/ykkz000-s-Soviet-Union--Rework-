@@ -9,6 +9,11 @@ Supported languages: English, 简体中文.
 ## Requirements
 
 - *Sid Meier's Civilization VI* with the **Gathering Storm (Expansion 2)** ruleset. The mod only supports this ruleset (see `RuleSetInUse=RULESET_EXPANSION_2` in `ActionCriteriaData` of the `.civ6proj`).
+- Enable this mod **together with** the two mods it depends on:
+  - `ykkz000's DLL Plugin Loader` — replaces the GameCore DLL and discovers/loads this mod's plugin.
+  - `ykkz000's DLL Plugin API` — provides the shared EffectType and persistence services the plugin imports.
+
+  All three mods must be enabled at the same time; the loader only loads plugins from enabled mods.
 
 ## In-Game Effects
 
@@ -37,13 +42,13 @@ Supported languages: English, 简体中文.
 - *Civilization VI* SDK and SDK Assets. The default Steam paths are used unless overridden with `--base-sdk` / `--base-assets`:
   - `...\steamapps\common\Sid Meier's Civilization VI SDK`
   - `...\steamapps\common\Sid Meier's Civilization VI SDK Assets`
-- vcpkg (manifest mode), used to obtain the third-party libraries (MinHook and Apache log4cxx with its transitive dependencies). Clone and bootstrap vcpkg, then set `VCPKG_ROOT`:
+- vcpkg (manifest mode). The consumer plugin links no third-party libraries; the manifest `natives/vcpkg.json` has no dependencies, but the build still passes the vcpkg toolchain. Clone and bootstrap vcpkg, then set `VCPKG_ROOT`:
   ```powershell
   git clone https://github.com/microsoft/vcpkg C:\vcpkg
   & C:\vcpkg\bootstrap-vcpkg.bat
   [Environment]::SetEnvironmentVariable('VCPKG_ROOT', 'C:\vcpkg', 'User')
   ```
-  The manifest `natives/vcpkg.json` installs the dependencies automatically during the CMake configure (into `natives/build/vcpkg_installed`). The default triplet is `x64-windows-static` (static CRT, matching `/MT`), so no extra runtime DLLs are deployed next to the mod. Use `--vcpkg-root <path>` / `--vcpkg-triplet <triplet>` to override the defaults.
+  Use `--vcpkg-root <path>` / `--vcpkg-triplet <triplet>` to override the defaults.
 
 ## Building from Source
 
@@ -67,7 +72,7 @@ Build with `.tools/build.ps1`. Quote the project file because its path contains 
 ```
 
 - Default output: `<Documents>\My Games\Sid Meier's Civilization VI\Mods\ykkz000's Soviet Union (Rework)`; override with `-o <path>` / `--output <path>`.
-- Deployed artifacts: the loader as `Binaries/Win64/GameCore_YKKZ000_Loader_XP2_FinalRelease.dll` and the plugin as `Binaries/Win64/ykkz000_civ6_plugin/Plugin_YKKZ000_Soviet_Union.dll`. The `--dll-prefix` must match the `DllPrefix` in `Data/YKKZ000_GameCores.sql`.
+- Deployed artifact: the consumer plugin as `Binaries/Win64/ykkz000_civ6_plugin/Plugin_YKKZ000_Soviet_Union.dll`. This repo no longer builds or deploys a loader; the loader is provided by `ykkz000's DLL Plugin Loader`, and the API plugins by `ykkz000's DLL Plugin API`. The consumer's imports of `GetEffectTypeApi`/`GetPersistenceApi` are resolved at link time via import libraries generated from the vendored `.def` files in `natives/vendor/plugin_api`.
 
 ## License
 

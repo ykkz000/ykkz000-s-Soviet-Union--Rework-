@@ -9,6 +9,11 @@
 ## 依赖
 
 - 需《席德·梅尔的文明 VI》的**风云变幻（Expansion 2）**规则集。本模组仅支持该规则集（见 `.civ6proj` 的 `ActionCriteriaData` 中的 `RuleSetInUse=RULESET_EXPANSION_2`）。
+- 请将本模组与它所依赖的两个模组**同时启用**：
+  - `ykkz000的DLL 插件加载器`——替换 GameCore DLL，并发现/加载本模组的插件。
+  - `ykkz000的DLL 插件 API`——提供插件所 import 的共享 EffectType 与持久化服务。
+
+  三个模组必须同时启用；loader 只会加载已启用模组的插件。
 
 ## 游戏中的效果
 
@@ -37,13 +42,13 @@
 - 《文明 VI》SDK 与 SDK Assets。默认使用 Steam 默认路径，可用 `--base-sdk` / `--base-assets` 覆盖：
   - `...\steamapps\common\Sid Meier's Civilization VI SDK`
   - `...\steamapps\common\Sid Meier's Civilization VI SDK Assets`
-- vcpkg（清单模式），用于获取第三方库（MinHook 与 Apache log4cxx 及其传递依赖）。克隆并引导 vcpkg，然后设置 `VCPKG_ROOT`：
+- vcpkg（清单模式）。consumer 插件不链接任何第三方库；清单 `natives/vcpkg.json` 无依赖，但构建仍会传入 vcpkg toolchain。克隆并引导 vcpkg，然后设置 `VCPKG_ROOT`：
   ```powershell
   git clone https://github.com/microsoft/vcpkg C:\vcpkg
   & C:\vcpkg\bootstrap-vcpkg.bat
   [Environment]::SetEnvironmentVariable('VCPKG_ROOT', 'C:\vcpkg', 'User')
   ```
-  清单 `natives/vcpkg.json` 会在 CMake 配置时自动安装依赖（到 `natives/build/vcpkg_installed`）。默认 triplet 为 `x64-windows-static`（静态 CRT，与 `/MT` 一致），因此不会向模组目录部署额外的运行时 DLL。可用 `--vcpkg-root <path>` / `--vcpkg-triplet <triplet>` 覆盖默认值。
+  可用 `--vcpkg-root <path>` / `--vcpkg-triplet <triplet>` 覆盖默认值。
 
 ## 从源码构建
 
@@ -67,7 +72,7 @@
 ```
 
 - 默认输出：`<Documents>\My Games\Sid Meier's Civilization VI\Mods\ykkz000's Soviet Union (Rework)`；可用 `-o <path>` / `--output <path>` 覆盖。
-- 部署产物：loader 部署为 `Binaries/Win64/GameCore_YKKZ000_Loader_XP2_FinalRelease.dll`，plugin 部署到 `Binaries/Win64/ykkz000_civ6_plugin/Plugin_YKKZ000_Soviet_Union.dll`。`--dll-prefix` 必须与 `Data/YKKZ000_GameCores.sql` 中的 `DllPrefix` 一致。
+- 部署产物：consumer 插件部署为 `Binaries/Win64/ykkz000_civ6_plugin/Plugin_YKKZ000_Soviet_Union.dll`。本仓库不再构建或部署 loader；loader 由 `ykkz000的DLL 插件加载器` 提供，API 插件由 `ykkz000的DLL 插件 API` 提供。consumer 对 `GetEffectTypeApi`/`GetPersistenceApi` 的 import 在链接期通过 `natives/vendor/plugin_api` 中内置 `.def` 生成的导入库解析。
 
 ## 许可证
 
