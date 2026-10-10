@@ -19,24 +19,30 @@
 ///                the engine, and introduces no mod data);
 ///       extra/ = overlay data and side tables for this mod (not part of the engine; shared by the
 ///                loader and each plugin).
-/// @note The single top-level extension side table: `PlayerExtras()`, keyed by player_id (the
-///       PlayerTypes at Player::Instance +0xD8). Each player entry holds two child tables:
-///       cities: key = city_id (City::Instance +0xA8, unique within a player);
-///       units: key = unit_id (Unit::Instance +0xB0, unique within a player).
-///       The top-level key is the player, so two players with a duplicated civilization/leader are
-///       naturally isolated; cleanup is also player-scoped (ClearPlayer drops all of that player's
-///       city/unit entries at once), with no need to scan for stale entries by id.
+/// @note Model: the extension side table mirrors the engine's own structure instead of a lazy
+///       effect-scoped map. Every one-to-many mapping the engine owns (player -> cities, player ->
+///       units) is reproduced here with **object pointers** as keys:
+///         top-level: Player::Instance* (stable for the lifetime of a game context);
+///         child:     City::Instance* / Unit::Instance* (stable while the object lives).
+///       An `AExtra` therefore organizes its `BExtra` children by pointer, exactly like the engine
+///       mapping (see natives/AGENTS.md "扩展数据结构规范"). Entries are created when the object is
+///       constructed and dropped when it is destroyed, so an extension exists for every live object
+///       rather than only for objects some effect happened to touch.
+/// @note Object identity (pointer / id / owner) is recycled by the engine: a destroyed object's
+///       pointer or (owner, id) key can be reused. Building the table on the **pointer** plus
+///       dropping the record from the City/Unit destructor hooks removes the reliance on (owner, id)
+///       that previously survived capture/move and corrupted the save/load stream.
 /// @note PlayerExtra contains unordered_map and child pointers, so it is **not a copyable type**.
 ///       The read hot path always goes through single-entry queries (FindCity snapshot /
 ///       FindUnitStrength scalar); **never** copy a whole PlayerExtra or a whole child table -- that
 ///       would copy "every city and unit of the player".
-/// @note The child tables hold `unique_ptr` values so that an `AExtra` organizes its `BExtra` by
-///       pointer, matching the engine's one-to-many mapping (player -> cities / player -> units)
-///       while keeping RAII ownership. The `Edit*` paths create the child on first access; the
-///       erase/clear paths release it.
+/// @note The child tables hold `unique_ptr` values so that an `AExtra` owns its `BExtra` by pointer,
+///       matching the engine's one-to-many mapping (player -> cities / player -> units) while
+///       keeping RAII ownership. The `Edit*` paths create the child on first access; the `Erase*` /
+///       `Drop*` paths release it.
 namespace ykkz000::extra {
 
-/// @brief Per-city extension data (key = city_id, stored in PlayerExtra::cities).
+/// @brief Per-city extension data (key = City::Instance pointer, stored in PlayerExtra::cities).
 /// @note percent[y]: the "percent per citizen" for that yield in this city, stored as FixedPoint<16>,
 ///       where 0x10000 == +1.0%/citizen (i.e. 1.0 means "+1% per citizen").
 ///       The read path folds it into the engine's modifier units as (percent[y] * population) >> 8:
@@ -46,18 +52,23 @@ namespace ykkz000::extra {
 ///       delta = (327680 * 10) >> 8 = 12800 == +50% (12800 / 25600). So FixedPoint<16> "percentage
 ///       points" under this representation are exactly lossless with (x * pop) >> 8.
 /// @note Aggregation semantics: Apply adds (+=), Remove subtracts (-=), independent of call order or
-///       instance count (repeated instances with the same parameters are no longer ambiguous); an
-///       all-zero vector is erased to avoid leftovers.
+///       instance count (repeated instances with the same parameters are no longer ambiguous).
 /// @note per_suzerain_percent[y]: the "percent per suzerain city" for that yield in this city, in the
 ///       same units as percent[y] (FixedPoint<16>, 0x10000 == +1.0%/suzerain). The suzerain count is
 ///       a runtime variable, so it is not multiplied at write time; instead the read path folds
 ///       (per_suzerain_percent[y] x current suzerain count) >> 8 into the engine's modifier units, so
 ///       a suzerain-count change is naturally followed by the next read.
-/// @note owner_id is a redundant check only: the read path re-reads City+0xD8 and compares, guarding
-///       against pointer recycling or a change of owner.
+/// @note city_id / owner_id / player are diagnostic/identity snapshots only: lookup is by the City
+///       pointer, so a capture that rewrites owner_id never loses the entry. `player` records the
+///       owning Player::Instance* so the entry can be reparented to the new owner's child table.
+/// @note hydrated is in-memory only (not persisted): it records that the values were already seeded
+///       from the city's persisted AutoVariables, so the (expensive) AutoVariable read runs once per
+///       object after a load instead of on every read.
 struct CityExtra {
   std::int32_t city_id = -1;    ///< City::Instance +0xA8
   std::int32_t owner_id = -1;   ///< City::Instance +0xD8 (PlayerTypes)
+  void* player = nullptr;       ///< Owning Player::Instance* (top-level key)
+  bool hydrated = false;        ///< In-memory only: side-table values seeded from AutoVariables
   std::int32_t yield_count = 0; ///< Valid length (<= civ6::kMaxYields), shared by both arrays
   std::array<std::int32_t, civ6::kMaxYields> percent{};
   std::array<std::int32_t, civ6::kMaxYields> per_suzerain_percent{};
@@ -66,19 +77,23 @@ struct CityExtra {
 static_assert(std::is_standard_layout_v<CityExtra>);
 static_assert(std::is_trivially_copyable_v<CityExtra>);
 
-/// @brief Per-unit extension data (key = unit_id, stored in PlayerExtra::units).
+/// @brief Per-unit extension data (key = Unit::Instance pointer, stored in PlayerExtra::units).
 /// @note strength_per_suzerain: the sum of the "per suzerain city" flat strength values of the
 ///       effect instances applying to this unit, in the same units as
 ///       AdjustPlayerStrengthModifier::amount (+0x40). The write-point hook books
 ///       strength_per_suzerain x current suzerain count.
 /// @note instances: an upsert map keyed by the effect object (instance = self) that guarantees
 ///       idempotence -- re-applying the same instance only overwrites, never double-adds (the engine
-///       replaying Apply/Remove does not inflate); strength_per_suzerain always equals the sum of the
+///       replaying Apply does not inflate); strength_per_suzerain always equals the sum of the
 ///       values.
+/// @note unit_id / owner_id / player are diagnostic/identity snapshots only; lookup is by the Unit
+///       pointer.
 /// @note Reserved: later per-unit quantities are appended here (keep append-only, never change the
 ///       offsets of existing fields).
 struct UnitExtra {
-  std::int32_t unit_id = -1;             ///< Unit::Instance +0xB0
+  std::int32_t unit_id = -1;              ///< Unit::Instance +0xB0
+  std::int32_t owner_id = -1;             ///< Unit::Instance +0x128 (PlayerTypes)
+  void* player = nullptr;                 ///< Owning Player::Instance* (top-level key)
   std::int32_t strength_per_suzerain = 0; ///< Sum over instances
   /// @note Reserved (unused): the aggregate restored from the unit's persisted AutoVariable after a
   ///       load. The strength template is replayed by the engine after a load, so the side table is
@@ -88,201 +103,230 @@ struct UnitExtra {
   std::unordered_map<void*, std::int32_t> instances; ///< key = the effect object self
 };
 
-/// @brief Per-player extension data (key = player_id), holding the two child tables.
+/// @brief Per-player extension data (key = Player::Instance*), holding the two child tables.
 struct PlayerExtra {
-  std::int32_t player_id = -1; ///< Player::Instance +0xD8 (PlayerTypes)
-  std::unordered_map<std::int32_t, std::unique_ptr<CityExtra>> cities; ///< key = city_id
-  std::unordered_map<std::int32_t, std::unique_ptr<UnitExtra>> units;  ///< key = unit_id
+  void* player = nullptr;       ///< Player::Instance* (top-level key)
+  std::int32_t player_id = -1;  ///< Player::Instance +0xD8 (PlayerTypes; diagnostic)
+  std::unordered_map<void*, std::unique_ptr<CityExtra>> cities; ///< key = City::Instance*
+  std::unordered_map<void*, std::unique_ptr<UnitExtra>> units;  ///< key = Unit::Instance*
 };
 
-/// @brief Top-level side-table key: player id.
-struct PlayerKey {
-  std::int32_t player_id = -1; ///< Player id (Player::Instance +0xD8, PlayerTypes)
-};
-
-/// @brief Hash functor for PlayerKey.
-struct PlayerKeyHash {
-  /// @brief Hash a PlayerKey.
-  /// @param[in] key The key to hash.
-  /// @return The mixed hash value.
-  std::size_t operator()(const PlayerKey& key) const noexcept {
-    // Same style as CityKeyHash: mix then expand, to avoid low-bit clustering.
-    std::uint64_t value = static_cast<std::uint32_t>(key.player_id);
-    value ^= value >> 33;
-    value *= 0xff51afd7ed558ccdULL;
-    value ^= value >> 33;
-    return static_cast<std::size_t>(value);
-  }
-};
-
-/// @brief Equality functor for PlayerKey.
-struct PlayerKeyEqual {
-  /// @brief Compare two PlayerKeys for equality.
-  /// @param[in] a Left key.
-  /// @param[in] b Right key.
-  /// @return true when both keys have the same player id.
-  bool operator()(const PlayerKey& a, const PlayerKey& b) const noexcept {
-    return a.player_id == b.player_id;
-  }
-};
-
-/// @brief Thread-safe side table: a single shared_mutex covers the top level and both child tables
-///   (writes exclusive, reads shared).
+/// @brief Thread-safe side table: a single shared_mutex covers the top level, both child tables, and
+///   the pointer indexes (writes exclusive, reads shared).
+/// @note Entries exist for every live City/Unit once `EditCity`/`EditUnit` (or the construct-time
+///       `Ensure*`) has run; `EraseCity`/`EraseUnit` drop them on destruction. The pointer indexes
+///       (`city_index_`/`unit_index_`) let every query resolve an entry from the object pointer
+///       alone, independent of the owner bucket, so a capture that changes the owner can never make
+///       an existing entry unreachable.
 class PlayerExtraTable {
  public:
-  /// @brief Write path: get/create and edit a player's top-level entry under the exclusive lock.
-  /// @param[in] key The player key.
-  /// @param[in] fn An edit callback taking PlayerExtra&.
+  /// @brief Construct-time hook: create the city's extension entry for a freshly constructed object,
+  ///   replacing any stale entry left by a recycled pointer (a destructor that was missed).
+  /// @param[in] player Owning Player::Instance* (may be null when the owner is not assigned yet).
+  /// @param[in] city City::Instance pointer (the lookup key).
+  /// @param[in] city_id City id snapshot (diagnostic; -1 when not assigned yet).
+  /// @param[in] owner_id Owner snapshot (diagnostic; -1 when not assigned yet).
+  /// @note Unlike `EditCity`, this resets the entry: a brand-new object must never inherit the values
+  ///       recorded for a previous object that reused the same address.
+  void EnsureCity(void* player, void* city, std::int32_t city_id, std::int32_t owner_id) {
+    if (city == nullptr) {
+      return;
+    }
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    EraseCityLocked(city);
+    (void)FindOrCreateCity(player, city, city_id, owner_id);
+  }
+
+  /// @brief Write path: get/create and edit a single city entry.
+  /// @param[in] player Owning Player::Instance* (entry is reparented when it changed).
+  /// @param[in] city City::Instance pointer (the lookup key).
+  /// @param[in] city_id City id snapshot (diagnostic).
+  /// @param[in] owner_id Owner snapshot (diagnostic).
+  /// @param[in] fn An edit callback taking CityExtra&.
   /// @note The callback form (rather than returning a reference) keeps the whole read-modify-write
   ///       under the lock, avoiding races with the shared-lock read path.
   template <typename Fn>
-  void EditPlayer(const PlayerKey& key, Fn&& fn) {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    fn(PlayerFor(key.player_id));
-  }
-
-  /// @brief Write path: edit a single city entry of a player (created from city_id/owner_id if it
-  ///   does not exist).
-  /// @param[in] player_id Player id.
-  /// @param[in] city_id City id.
-  /// @param[in] owner_id The city owner (redundant check, see CityExtra::owner_id).
-  /// @param[in] fn An edit callback taking CityExtra&.
-  template <typename Fn>
-  void EditCity(std::int32_t player_id, std::int32_t city_id,
-                std::int32_t owner_id, Fn&& fn) {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    PlayerExtra& player = PlayerFor(player_id);
-    std::unique_ptr<CityExtra>& slot = player.cities[city_id];
-    if (slot == nullptr || slot->city_id != city_id || slot->owner_id != owner_id) {
-      slot = std::make_unique<CityExtra>();
-      slot->city_id = city_id;
-      slot->owner_id = owner_id;
+  void EditCity(void* player, void* city, std::int32_t city_id, std::int32_t owner_id, Fn&& fn) {
+    if (city == nullptr) {
+      return;
     }
-    fn(*slot);
-  }
-
-  /// @brief Write path: edit a single unit entry of a player (created if it does not exist).
-  /// @param[in] player_id Player id.
-  /// @param[in] unit_id Unit id.
-  /// @param[in] fn An edit callback taking UnitExtra&.
-  template <typename Fn>
-  void EditUnit(std::int32_t player_id, std::int32_t unit_id, Fn&& fn) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    PlayerExtra& player = PlayerFor(player_id);
-    std::unique_ptr<UnitExtra>& slot = player.units[unit_id];
-    if (slot == nullptr || slot->unit_id != unit_id) {
-      slot = std::make_unique<UnitExtra>();
-      slot->unit_id = unit_id;
+    CityExtra* entry = FindOrCreateCity(player, city, city_id, owner_id);
+    if (entry != nullptr) {
+      fn(*entry);
     }
-    fn(*slot);
   }
 
-  /// @brief Read-only query (hot path): a snapshot of a single city entry.
-  /// @param[in] player_id Player id.
-  /// @param[in] city_id City id.
+  /// @brief Read-only query (hot path): a snapshot of a single city entry by object pointer.
+  /// @param[in] city City::Instance pointer.
   /// @param[out] out On a hit, receives a snapshot of the entry (CityExtra is trivially copyable, no
   ///   heap allocation).
   /// @return true on a hit, otherwise false (out is unchanged).
-  bool FindCity(std::int32_t player_id, std::int32_t city_id,
-                CityExtra& out) const {
+  bool FindCity(void* city, CityExtra& out) const {
+    if (city == nullptr) {
+      return false;
+    }
     std::shared_lock<std::shared_mutex> lock(mutex_);
-    const auto player_it = table_.find(PlayerKey{player_id});
-    if (player_it == table_.end()) {
+    const auto index_it = city_index_.find(city);
+    if (index_it == city_index_.end() || index_it->second == nullptr) {
       return false;
     }
-    const auto city_it = player_it->second.cities.find(city_id);
-    if (city_it == player_it->second.cities.end()) {
-      return false;
-    }
-    out = *city_it->second;
+    out = *index_it->second;
     return true;
   }
 
-  /// @brief Read-only query (hot path): only the aggregate scalar of a unit.
-  /// @param[in] player_id Player id.
-  /// @param[in] unit_id Unit id.
+  /// @brief Reparent a city entry into a new owner's child table (capture / owner change).
+  /// @param[in] player The new owning Player::Instance*.
+  /// @param[in] city City::Instance pointer.
+  /// @param[in] owner_id The new owner snapshot (diagnostic).
+  /// @note No-op when the entry does not exist or is already under `player`.
+  void ReparentCity(void* player, void* city, std::int32_t owner_id) {
+    if (city == nullptr || player == nullptr) {
+      return;
+    }
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    const auto index_it = city_index_.find(city);
+    if (index_it == city_index_.end() || index_it->second == nullptr) {
+      return;
+    }
+    CityExtra* entry = index_it->second;
+    entry->owner_id = owner_id;
+    MoveCityToPlayer(player, city, entry);
+  }
+
+  /// @brief Unconditionally erase a city entry (the engine destroyed the city), then erase the
+  ///   player entry when both child tables become empty.
+  /// @param[in] city City::Instance pointer.
+  /// @note Called on the destruction path, where the object is gone regardless of the values still
+  ///       recorded in the entry.
+  void EraseCity(void* city) {
+    if (city == nullptr) {
+      return;
+    }
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    EraseCityLocked(city);
+  }
+
+  /// @brief Construct-time hook: create the unit's extension entry for a freshly constructed object,
+  ///   replacing any stale entry left by a recycled pointer.
+  /// @param[in] player Owning Player::Instance* (may be null when the owner is not assigned yet).
+  /// @param[in] unit Unit::Instance pointer (the lookup key).
+  /// @param[in] unit_id Unit id snapshot (diagnostic; -1 when not assigned yet).
+  /// @param[in] owner_id Owner snapshot (diagnostic; -1 when not assigned yet).
+  void EnsureUnit(void* player, void* unit, std::int32_t unit_id, std::int32_t owner_id) {
+    if (unit == nullptr) {
+      return;
+    }
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    EraseUnitLocked(unit);
+    (void)FindOrCreateUnit(player, unit, unit_id, owner_id);
+  }
+
+  /// @brief Write path: get/create and edit a single unit entry.
+  /// @param[in] player Owning Player::Instance* (entry is reparented when it changed).
+  /// @param[in] unit Unit::Instance pointer (the lookup key).
+  /// @param[in] unit_id Unit id snapshot (diagnostic).
+  /// @param[in] owner_id Owner snapshot (diagnostic).
+  /// @param[in] fn An edit callback taking UnitExtra&.
+  template <typename Fn>
+  void EditUnit(void* player, void* unit, std::int32_t unit_id, std::int32_t owner_id, Fn&& fn) {
+    if (unit == nullptr) {
+      return;
+    }
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    UnitExtra* entry = FindOrCreateUnit(player, unit, unit_id, owner_id);
+    if (entry != nullptr) {
+      fn(*entry);
+    }
+  }
+
+  /// @brief Read-only query (hot path): only the aggregate scalar of a unit by object pointer.
+  /// @param[in] unit Unit::Instance pointer.
   /// @return The aggregate scalar.
   /// @note **Does not copy the instances map** (avoids a heap allocation on every read). Both a
   ///       missing entry and a zero aggregate return 0, and the caller falls back to the template
   ///       Amount accordingly.
-  std::int32_t FindUnitStrength(std::int32_t player_id,
-                                std::int32_t unit_id) const {
+  std::int32_t FindUnitStrength(void* unit) const {
+    if (unit == nullptr) {
+      return 0;
+    }
     std::shared_lock<std::shared_mutex> lock(mutex_);
-    const auto player_it = table_.find(PlayerKey{player_id});
-    if (player_it == table_.end()) {
+    const auto index_it = unit_index_.find(unit);
+    if (index_it == unit_index_.end() || index_it->second == nullptr) {
       return 0;
     }
-    const auto unit_it = player_it->second.units.find(unit_id);
-    if (unit_it == player_it->second.units.end()) {
-      return 0;
-    }
-    return unit_it->second->strength_per_suzerain;
+    return index_it->second->strength_per_suzerain;
   }
 
-  /// @brief Erase the city entry once both arrays are all zero; erase the player entry too when both
-  ///   child tables become empty, to avoid leftover empty shells.
-  /// @param[in] player_id Player id.
-  /// @param[in] city_id City id.
-  void EraseIfEmptyCity(std::int32_t player_id, std::int32_t city_id) {
+  /// @brief Reparent a unit entry into a new owner's child table (unit transfer).
+  /// @param[in] player The new owning Player::Instance*.
+  /// @param[in] unit Unit::Instance pointer.
+  /// @param[in] owner_id The new owner snapshot (diagnostic).
+  void ReparentUnit(void* player, void* unit, std::int32_t owner_id) {
+    if (unit == nullptr || player == nullptr) {
+      return;
+    }
     std::unique_lock<std::shared_mutex> lock(mutex_);
-    const auto player_it = table_.find(PlayerKey{player_id});
+    const auto index_it = unit_index_.find(unit);
+    if (index_it == unit_index_.end() || index_it->second == nullptr) {
+      return;
+    }
+    UnitExtra* entry = index_it->second;
+    entry->owner_id = owner_id;
+    MoveUnitToPlayer(player, unit, entry);
+  }
+
+  /// @brief Unconditionally erase a unit entry (the engine destroyed the unit), then erase the
+  ///   player entry when both child tables become empty.
+  /// @param[in] unit Unit::Instance pointer.
+  void EraseUnit(void* unit) {
+    if (unit == nullptr) {
+      return;
+    }
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    EraseUnitLocked(unit);
+  }
+
+  /// @brief Ensure a player's top-level entry exists (lazily called; there is no player-construct
+  ///   entry point yet, so a player bucket is created on first city/unit association).
+  /// @param[in] player Player::Instance*.
+  /// @param[in] player_id Player type (diagnostic).
+  void EnsurePlayer(void* player, std::int32_t player_id) {
+    if (player == nullptr) {
+      return;
+    }
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    PlayerExtra& bucket = PlayerFor(player);
+    bucket.player_id = player_id;
+  }
+
+  /// @brief Drop a player's whole top-level entry (player eliminated). Removes the pointer indexes
+  ///   of every owned city/unit so no dangling index remains.
+  /// @param[in] player Player::Instance*.
+  void DropPlayer(void* player) {
+    if (player == nullptr) {
+      return;
+    }
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    const auto player_it = table_.find(player);
     if (player_it == table_.end()) {
       return;
     }
-    PlayerExtra& player = player_it->second;
-    const auto city_it = player.cities.find(city_id);
-    if (city_it == player.cities.end()) {
-      return;
+    for (const auto& entry : player_it->second.cities) {
+      city_index_.erase(entry.first);
     }
-    const CityExtra& city = *city_it->second;
-    for (const std::int32_t value : city.percent) {
-      if (value != 0) {
-        return;
-      }
+    for (const auto& entry : player_it->second.units) {
+      unit_index_.erase(entry.first);
     }
-    for (const std::int32_t value : city.per_suzerain_percent) {
-      if (value != 0) {
-        return;
-      }
-    }
-    player.cities.erase(city_it);
-    ErasePlayerIfBothEmpty(player_it);
-  }
-
-  /// @brief Erase the unit entry once there are no instances and the aggregate is zero; erase the
-  ///   player entry too when both child tables become empty.
-  /// @param[in] player_id Player id.
-  /// @param[in] unit_id Unit id.
-  void EraseIfEmptyUnit(std::int32_t player_id, std::int32_t unit_id) {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    const auto player_it = table_.find(PlayerKey{player_id});
-    if (player_it == table_.end()) {
-      return;
-    }
-    PlayerExtra& player = player_it->second;
-    const auto unit_it = player.units.find(unit_id);
-    if (unit_it == player.units.end()) {
-      return;
-    }
-    if (!unit_it->second->instances.empty() ||
-        unit_it->second->strength_per_suzerain != 0) {
-      return;
-    }
-    player.units.erase(unit_it);
-    ErasePlayerIfBothEmpty(player_it);
-  }
-
-  /// @brief Player died / was eliminated: drop all of that player's city/unit entries.
-  /// @param[in] key The player key.
-  void ClearPlayer(const PlayerKey& key) {
-    std::unique_lock<std::shared_mutex> lock(mutex_);
-    table_.erase(key);
+    table_.erase(player_it);
   }
 
   /// @brief Clear the whole side table.
   void Clear() {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     table_.clear();
+    city_index_.clear();
+    unit_index_.clear();
   }
 
   /// @brief Diagnostics: one-shot table size statistics.
@@ -307,32 +351,178 @@ class PlayerExtraTable {
   }
 
  private:
-  using Table =
-      std::unordered_map<PlayerKey, PlayerExtra, PlayerKeyHash, PlayerKeyEqual>;
+  using Table = std::unordered_map<void*, PlayerExtra>;
 
   /// @brief Get/create a player's top-level entry.
   /// @note The caller must already hold the exclusive lock.
-  PlayerExtra& PlayerFor(std::int32_t player_id) {
-    const PlayerKey key{player_id};
-    PlayerExtra& player = table_[key];
-    if (player.player_id != player_id) {
-      player = PlayerExtra{};
-      player.player_id = player_id;
+  PlayerExtra& PlayerFor(void* player) {
+    PlayerExtra& bucket = table_[player];
+    if (bucket.player != player) {
+      bucket = PlayerExtra{};
+      bucket.player = player;
     }
-    return player;
+    return bucket;
+  }
+
+  /// @brief Erase a city entry and its index record.
+  /// @note The caller must already hold the exclusive lock.
+  void EraseCityLocked(void* city) {
+    const auto index_it = city_index_.find(city);
+    if (index_it == city_index_.end()) {
+      return;
+    }
+    CityExtra* entry = index_it->second;
+    city_index_.erase(index_it);
+    if (entry != nullptr && entry->player != nullptr) {
+      const auto player_it = table_.find(entry->player);
+      if (player_it != table_.end()) {
+        player_it->second.cities.erase(city);
+        ErasePlayerIfEmpty(player_it);
+      }
+    }
+  }
+
+  /// @brief Erase a unit entry and its index record.
+  /// @note The caller must already hold the exclusive lock.
+  void EraseUnitLocked(void* unit) {
+    const auto index_it = unit_index_.find(unit);
+    if (index_it == unit_index_.end()) {
+      return;
+    }
+    UnitExtra* entry = index_it->second;
+    unit_index_.erase(index_it);
+    if (entry != nullptr && entry->player != nullptr) {
+      const auto player_it = table_.find(entry->player);
+      if (player_it != table_.end()) {
+        player_it->second.units.erase(unit);
+        ErasePlayerIfEmpty(player_it);
+      }
+    }
+  }
+
+  /// @brief Find a city entry by pointer (creating it under `player` when absent).
+  /// @note The caller must already hold the exclusive lock.
+  CityExtra* FindOrCreateCity(void* player, void* city, std::int32_t city_id,
+                              std::int32_t owner_id) {
+    const auto index_it = city_index_.find(city);
+    if (index_it != city_index_.end() && index_it->second != nullptr) {
+      CityExtra* entry = index_it->second;
+      entry->city_id = city_id;
+      entry->owner_id = owner_id;
+      MoveCityToPlayer(player, city, entry);
+      return entry;
+    }
+    if (player == nullptr) {
+      return nullptr;
+    }
+    PlayerExtra& bucket = PlayerFor(player);
+    bucket.player_id = owner_id;
+    auto owned = std::make_unique<CityExtra>();
+    owned->city_id = city_id;
+    owned->owner_id = owner_id;
+    owned->player = player;
+    CityExtra* raw = owned.get();
+    bucket.cities.emplace(city, std::move(owned));
+    city_index_.emplace(city, raw);
+    return raw;
+  }
+
+  /// @brief Find a unit entry by pointer (creating it under `player` when absent).
+  /// @note The caller must already hold the exclusive lock.
+  UnitExtra* FindOrCreateUnit(void* player, void* unit, std::int32_t unit_id,
+                              std::int32_t owner_id) {
+    const auto index_it = unit_index_.find(unit);
+    if (index_it != unit_index_.end() && index_it->second != nullptr) {
+      UnitExtra* entry = index_it->second;
+      entry->unit_id = unit_id;
+      entry->owner_id = owner_id;
+      MoveUnitToPlayer(player, unit, entry);
+      return entry;
+    }
+    if (player == nullptr) {
+      return nullptr;
+    }
+    PlayerExtra& bucket = PlayerFor(player);
+    bucket.player_id = owner_id;
+    auto owned = std::make_unique<UnitExtra>();
+    owned->unit_id = unit_id;
+    owned->owner_id = owner_id;
+    owned->player = player;
+    UnitExtra* raw = owned.get();
+    bucket.units.emplace(unit, std::move(owned));
+    unit_index_.emplace(unit, raw);
+    return raw;
+  }
+
+  /// @brief Move a city's owning unique_ptr to another player's child table (node transfer keeps
+  ///   the pointee address and therefore the raw pointer index valid).
+  /// @note The caller must already hold the exclusive lock.
+  void MoveCityToPlayer(void* player, void* city, CityExtra* entry) {
+    if (player == nullptr || entry == nullptr || entry->player == player) {
+      return;
+    }
+    void* const old_player = entry->player;
+    if (old_player == nullptr) {
+      return;
+    }
+    const auto old_it = table_.find(old_player);
+    if (old_it == table_.end()) {
+      return;
+    }
+    auto node = old_it->second.cities.extract(city);
+    if (node.empty()) {
+      return;
+    }
+    // Erase the old bucket (if it is now empty) *before* inserting into the destination: the insert
+    // may rehash `table_` and invalidate this iterator.
+    if (old_it->second.cities.empty() && old_it->second.units.empty()) {
+      table_.erase(old_it);
+    }
+    PlayerExtra& dst = PlayerFor(player);
+    dst.player_id = entry->owner_id;
+    dst.cities.insert(std::move(node));
+    entry->player = player;
+  }
+
+  /// @brief Unit counterpart of MoveCityToPlayer.
+  /// @note The caller must already hold the exclusive lock.
+  void MoveUnitToPlayer(void* player, void* unit, UnitExtra* entry) {
+    if (player == nullptr || entry == nullptr || entry->player == player) {
+      return;
+    }
+    void* const old_player = entry->player;
+    if (old_player == nullptr) {
+      return;
+    }
+    const auto old_it = table_.find(old_player);
+    if (old_it == table_.end()) {
+      return;
+    }
+    auto node = old_it->second.units.extract(unit);
+    if (node.empty()) {
+      return;
+    }
+    if (old_it->second.cities.empty() && old_it->second.units.empty()) {
+      table_.erase(old_it);
+    }
+    PlayerExtra& dst = PlayerFor(player);
+    dst.player_id = entry->owner_id;
+    dst.units.insert(std::move(node));
+    entry->player = player;
   }
 
   /// @brief Erase the player entry when both child tables are empty.
-  /// @note The caller must already hold the exclusive lock.
-  void ErasePlayerIfBothEmpty(Table::iterator player_it) {
-    if (player_it->second.cities.empty() &&
-        player_it->second.units.empty()) {
+  /// @note The caller must already hold the exclusive lock. Invalidates `player_it`.
+  void ErasePlayerIfEmpty(Table::iterator player_it) {
+    if (player_it->second.cities.empty() && player_it->second.units.empty()) {
       table_.erase(player_it);
     }
   }
 
   mutable std::shared_mutex mutex_;
   Table table_;
+  std::unordered_map<void*, CityExtra*> city_index_; ///< City::Instance* -> owned entry (raw)
+  std::unordered_map<void*, UnitExtra*> unit_index_; ///< Unit::Instance* -> owned entry (raw)
 };
 
 /// @brief In-process singleton side table.

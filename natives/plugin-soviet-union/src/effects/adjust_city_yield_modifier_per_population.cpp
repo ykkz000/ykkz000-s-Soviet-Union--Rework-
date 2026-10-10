@@ -17,6 +17,7 @@
 #include <ykkz000/plugin/city_yield_common.h>
 #include <ykkz000/plugin/engine_access.h>
 #include <ykkz000/plugin/extra_persistence.h>
+#include <ykkz000/plugin/object_cleanup.h>
 
 // Injection host for city-yield modifiers: append two "multiply at read time" modifiers on the
 // engine's yield read path City::Instance::CalculateYield --
@@ -108,6 +109,10 @@ void ApplyEntries(void* self, void* city, int sign) {
   if (!CityRefOf(city, ref)) {
     return;
   }
+  void* const player = PlayerForOwnerId(ref.player_id);
+  if (player == nullptr) {
+    return;
+  }
   static std::atomic<bool> kLoggedFirstApply{false};
   if (!kLoggedFirstApply.exchange(true)) {
     LogInfoF("city-yield: first apply self=%p city=%p owner=%d entries=%zu", self, city,
@@ -125,7 +130,7 @@ void ApplyEntries(void* self, void* city, int sign) {
   // reset the restored values.
   EnsureCityExtraHydrated(city, ref);
   extra::PlayerExtras().EditCity(
-      ref.player_id, ref.city_id, ref.player_id, [&](extra::CityExtra& extra) {
+      player, city, ref.city_id, ref.player_id, [&](extra::CityExtra& extra) {
         for (const EffectEntry& entry : entries) {
           if (entry.yield_type < 0 ||
               entry.yield_type >= static_cast<int>(civ6::kMaxYields)) {
@@ -157,9 +162,8 @@ void ApplyEntries(void* self, void* city, int sign) {
   // clears again. This must happen in Apply/Remove, never inside the CalculateYield hook
   // (otherwise every read would trigger a recompute/notification).
   InvalidateAndNotifyCityYield(city, entries);
-  if (sign < 0) {
-    extra::PlayerExtras().EraseIfEmptyCity(ref.player_id, ref.city_id);
-  }
+  // The entry is never erased on a zeroing Remove: extensions exist for every live city (see
+  // extra/player_extra.h); only the numeric values change.
   InvalidateCityExtraSnapshotCache();
 }
 
@@ -371,13 +375,17 @@ void UninstallHook() {
 }
 
 // Context lifecycle: enable the hook and clear the side table on created; disable and clear on
-// destroyed.
+// destroyed. The object-destruction cleanup hooks are installed alongside the yield hook so a city
+// destroyed without a template Remove (razing/capture) still drops its side-table records.
 void OnContext(bridge::GameContextEvent event, void* /*context*/) {
   if (event == bridge::GameContextEvent::kCreated) {
     (void)InstallHooksOnce();
+    (void)EnsureObjectCleanupHooks();
     ClearExtras(); // New context: old city keys are all invalid
     return;
   }
+  // Remove the destructor hooks first (while the context is gone) before clearing the side table.
+  RemoveObjectCleanupHooks();
   UninstallHook();
 }
 

@@ -12,6 +12,8 @@
 
 #include <ykkz000/loader/internal.h>
 
+#include "serialization_trace.h"
+
 // -- Crash-context capture (VEH) --
 // Requirements: no heap dependency, no debugger dependency; only append to a small file.
 namespace ykkz000::loader {
@@ -235,6 +237,10 @@ LONG CALLBACK CrashCapture_Handler(PEXCEPTION_POINTERS info) {
 
   crashLogStack(ctx);
   crashLogModules();
+
+  // Dump the serialization read trace (the last values the AutoVariable helpers transferred), which
+  // shows where the load stream derailed. No-op in release builds.
+  dumpSerializationTrace(&crashWrite);
 
   // Optional: keep the process alive to ease "Task Manager -> Create dump file".
   //   Usage: set the environment variable YKKZ000_CRASH_HOLD_MS (milliseconds); for example,

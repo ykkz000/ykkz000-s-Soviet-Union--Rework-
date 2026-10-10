@@ -1,6 +1,7 @@
 #include <ykkz000/plugin/extra_persistence.h>
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -11,6 +12,7 @@
 
 #include <ykkz000/bridge/host.h>
 #include <ykkz000/civ6/common.h>
+#include <ykkz000/extra/player_extra.h>
 
 #include <ykkz000/plugin/engine_access.h>
 
@@ -92,6 +94,44 @@ std::unordered_map<void*, CityVars> g_cityVars;
 // dereference a released variable.
 std::vector<CityVars> g_pendingCities;
 std::atomic<bool> g_enabled{false};
+
+#if defined(_DEBUG)
+// Diagnostic clock and per-hook counters, used only to locate load slowness. The origin is this
+// Plugin DLL's own enable time (the Loader keeps a separate origin), so the t_ms values of the two
+// DLLs are not comparable.
+std::atomic<long long> g_ctxStartMs{-1};
+std::atomic<long> g_cityCtorCalls{0};
+std::atomic<long> g_citySaveCalls{0};
+std::atomic<long> g_cityLoadCalls{0};
+
+long long SteadyNowMs() {
+  return static_cast<long long>(
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+}
+
+// Milliseconds since the anchor; sets the anchor on first use.
+long long ElapsedMs() {
+  const long long now = SteadyNowMs();
+  long long anchor = g_ctxStartMs.load(std::memory_order_acquire);
+  if (anchor < 0) {
+    long long expected = -1;
+    if (g_ctxStartMs.compare_exchange_strong(expected, now, std::memory_order_acq_rel)) {
+      anchor = now;
+    } else {
+      anchor = expected;
+    }
+  }
+  return now - anchor;
+}
+
+// Copies the map size under its own lock; the caller logs after the lock is released.
+std::size_t CityVarCount() {
+  std::lock_guard<std::mutex> lock(g_mutex);
+  return g_cityVars.size();
+}
+#endif
 
 std::mutex g_hookMutex;
 CityConstructorFn g_cityCtorOriginal = nullptr;
@@ -274,13 +314,60 @@ void RegisterCity(void* city) {
 #endif
 }
 
+// Creates the city's extension entry under its owning player (best-effort; identity may not be
+// assigned yet at construction, in which case the entry is created later on the first read/write).
+void EnsureCityEntry(void* city) {
+  if (city == nullptr) {
+    return;
+  }
+  const std::int32_t city_id =
+      TryReadOr(city, &civ6::City::Instance::city_id, std::int32_t{-1});
+  // City::Instance::owner is a raw PlayerTypes stored as int32.
+  const std::int32_t owner_id =
+      TryReadOr(city, &civ6::City::Instance::owner, std::int32_t{-1});
+  if (owner_id < 0 || owner_id > kMaxPlausiblePlayerIndex) {
+    return;
+  }
+  void* const player = PlayerForOwnerId(owner_id);
+  if (player == nullptr) {
+    return;
+  }
+  extra::PlayerExtras().EnsureCity(player, city, city_id, owner_id);
+}
+
+// Ensures the city's custom AutoVariables exist before the engine serializes them. The constructor
+// hook normally registered them, but a city created through a path that bypasses the profiled
+// constructor (capture/move) would otherwise save no variables while the load-side constructor
+// registers and reads them -- desynchronizing the stream. Registering here makes save/load symmetric
+// (exactly one fixed-length payload per city on both sides).
+void EnsureCityRegistered(void* city) {
+  if (city == nullptr || !g_enabled.load(std::memory_order_acquire)) {
+    return;
+  }
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_cityVars.find(city) != g_cityVars.end()) {
+      return;
+    }
+  }
+  RegisterCity(city);
+}
+
 void* CityConstructor_Hook(void* self) {
   if (g_cityCtorOriginal != nullptr) {
     (void)g_cityCtorOriginal(self);
   }
   if (self != nullptr && g_enabled.load(std::memory_order_acquire)) {
     RegisterCity(self);
+    EnsureCityEntry(self);
   }
+#if defined(_DEBUG)
+  const long ctor_n = ++g_cityCtorCalls;
+  if (ctor_n <= 16 || (ctor_n % 128) == 0) {
+    LogDebugF("persistence: ctor #%ld t_ms=%lld city=%p map=%zu", ctor_n, ElapsedMs(), self,
+              CityVarCount());
+  }
+#endif
   // A constructor returns its this pointer; returning self keeps the engine call chain intact.
   return self;
 }
@@ -362,6 +449,13 @@ CityVars LookupCityVars(void* city) {
   if (!g_enabled.load(std::memory_order_acquire) || city == nullptr) {
     return vars;
   }
+#if defined(_DEBUG)
+  static std::atomic<long> kLookupCount{0};
+  const long lookup_n = ++kLookupCount;
+  if ((lookup_n % 4096) == 0) {
+    LogDebugF("persistence: lookup #%ld t_ms=%lld", lookup_n, ElapsedMs());
+  }
+#endif
   std::lock_guard<std::mutex> lock(g_mutex);
   const auto it = g_cityVars.find(city);
   return it != g_cityVars.end() ? it->second : vars;
@@ -401,23 +495,56 @@ void LoadCityVariables(void* stream, const CityVars& vars) {
 
 // Forward the engine's own city save once, then append our values through the descriptor vtable.
 void* CitySerializeSave_Hook(void* stream, void* city) {
+#if defined(_DEBUG)
+  const auto hook_start = std::chrono::steady_clock::now();
+#endif
+  // Fallback registration: guarantee this city owns its custom variables before they are serialized,
+  // so the save stream carries one fixed-length payload per city on both sides.
+  EnsureCityRegistered(city);
   void* result =
       g_citySerializeSaveOriginal != nullptr ? g_citySerializeSaveOriginal(stream, city) : nullptr;
   if (g_citySerializeSaveOriginal != nullptr && g_enabled.load(std::memory_order_acquire)) {
     SaveCityVariables(stream, city);
   }
+#if defined(_DEBUG)
+  const long save_n = ++g_citySaveCalls;
+  if (save_n <= 16 || (save_n % 128) == 0) {
+    const long long hook_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                  std::chrono::steady_clock::now() - hook_start)
+                                  .count();
+    LogDebugF("persistence: save #%ld t_ms=%lld hook_us=%lld city=%p map=%zu", save_n,
+              ElapsedMs(), hook_us, city, CityVarCount());
+  }
+#endif
   return result;
 }
 
 // Forward the engine's own city load once, then read our values through the descriptor vtable. The
 // lookup happens before the original so the variable handles are captured while the map is intact.
 void* CitySerializeLoad_Hook(void* stream, void* city) {
+#if defined(_DEBUG)
+  const auto hook_start = std::chrono::steady_clock::now();
+#endif
+  // Fallback registration (load side): the load-side object is reconstructed through the profiled
+  // constructor, which already registered the variables; this covers any path that did not.
+  EnsureCityRegistered(city);
   const CityVars vars = LookupCityVars(city);
   void* result =
       g_citySerializeLoadOriginal != nullptr ? g_citySerializeLoadOriginal(stream, city) : nullptr;
   if (g_citySerializeLoadOriginal != nullptr && g_enabled.load(std::memory_order_acquire)) {
     LoadCityVariables(stream, vars);
   }
+#if defined(_DEBUG)
+  const long load_n = ++g_cityLoadCalls;
+  if (load_n <= 16 || (load_n % 128) == 0) {
+    const long long hook_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                  std::chrono::steady_clock::now() - hook_start)
+                                  .count();
+    LogDebugF("persistence: load #%ld t_ms=%lld hook_us=%lld city=%p pct=%p suz=%p map=%zu",
+              load_n, ElapsedMs(), hook_us, city, vars.percent.object, vars.per_suzerain.object,
+              CityVarCount());
+  }
+#endif
   return result;
 }
 
@@ -551,6 +678,10 @@ bool PersistenceDisabledByEnvironment() {
 } // namespace
 
 bool EnsurePersistenceHooks() {
+#if defined(_DEBUG)
+  (void)ElapsedMs(); // Anchor the diagnostic clock at context enable time.
+  LogDebugF("persistence: enabled; ctx start");
+#endif
   if (PersistenceDisabledByEnvironment()) {
     static std::atomic<bool> kLoggedDisabled{false};
     if (!kLoggedDisabled.exchange(true)) {
@@ -660,6 +791,17 @@ bool LoadCityValues(void* city, std::int32_t* percent_out, std::int32_t* per_suz
     }
   }
   return percent || per_suzerain;
+}
+
+void ForgetCityVars(void* city) {
+  if (city == nullptr) {
+    return;
+  }
+  // Only the lookup record is dropped. The variable objects and their data buffers are owned by the
+  // engine's archive/descriptor destruction path, so this must not free or dereference them; it only
+  // prevents a recycled city pointer from reusing the previous object's stale handles.
+  std::lock_guard<std::mutex> lock(g_mutex);
+  g_cityVars.erase(city);
 }
 
 } // namespace ykkz000::plugin

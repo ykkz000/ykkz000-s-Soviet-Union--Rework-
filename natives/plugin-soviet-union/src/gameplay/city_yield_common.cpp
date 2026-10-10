@@ -25,14 +25,14 @@ using ChangeYieldModifierFn = void (*)(void* city, int yield, int delta);
 // paths complete inside their own locks).
 std::atomic<std::uint64_t> kTableGeneration{0};
 
-// Read-path TLS cache: consecutive lookups of the same key hit directly, avoiding a shared-lock
+// Read-path TLS cache: consecutive lookups of the same city hit directly, avoiding a shared-lock
 // table lookup on every call.
-// The cache identity is the side-table key (player id + city id, not the city pointer): when a
-// city pointer is recycled and reused, the key differs and the cache is invalidated naturally.
+// The cache identity is the **city object pointer** (the side-table key): a recycled pointer that is
+// reused by a new city produces a different generation at the destruction/edit point and is
+// invalidated naturally, and a capture that only changes the owner keeps the same entry.
 struct TlsCache {
   std::uint64_t generation = 0;
-  std::int32_t player_id = -1;
-  std::int32_t city_id = -1;
+  void* city = nullptr;
   extra::CityExtra extra{};
   bool valid = false;
 };
@@ -68,6 +68,36 @@ void LogCityLookup(const CityRef& ref, std::uint64_t generation, const char* out
             "suz[0]=%d yield_count=%d",
             ref.player_id, ref.city_id, outcome,
             static_cast<unsigned long long>(generation), percent, per_suzerain, yield_count);
+}
+
+// Local diagnostic clock, anchored on this translation unit's first use (the Plugin's persistence
+// layer keeps its own anchor; the two are not claimed to be a shared origin).
+long long DebugElapsedMs() {
+  static const auto start = std::chrono::steady_clock::now();
+  return static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::steady_clock::now() - start).count());
+}
+
+std::atomic<long> kHydrateCalls{0};
+
+// Cold-path (non-TLS) timing: reports the elapsed microseconds every 128 lookups, and snapshots the
+// side-table size every 1024 to watch for unbounded growth.
+void LogCityLookupSlow(const CityRef& ref, const char* outcome,
+                       std::chrono::steady_clock::time_point start) {
+  static std::atomic<long> kCount{0};
+  const long n = ++kCount;
+  if (n > 16 && (n % 128) != 0) {
+    return;
+  }
+  const long long elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now() - start).count();
+  LogDebugF("city-yield: slow #%ld t_ms=%lld player=%d city=%d outcome=%s elapsed_us=%lld", n,
+            DebugElapsedMs(), ref.player_id, ref.city_id, outcome, elapsed_us);
+  if ((n % 1024) == 0) {
+    const extra::PlayerExtraTable::Stats stats = extra::PlayerExtras().CountStats();
+    LogDebugF("city-yield: extra table players=%zu cities=%zu units=%zu", stats.players,
+              stats.cities, stats.units);
+  }
 }
 #endif
 
@@ -144,40 +174,33 @@ void InvalidateAndNotifyCityYield(void* city, const std::vector<EffectEntry>& en
 }
 
 const extra::CityExtra* LookupCityExtraForCity(void* city, const CityRef& ref) {
+  if (city == nullptr) {
+    return nullptr;
+  }
   const std::uint64_t generation = kTableGeneration.load(std::memory_order_acquire);
-  if (kCache.generation == generation && kCache.player_id == ref.player_id &&
-      kCache.city_id == ref.city_id) {
+  if (kCache.generation == generation && kCache.city == city) {
 #if defined(_DEBUG)
     LogCityLookup(ref, generation, kCache.valid ? "tls-hit" : "tls-miss",
                   kCache.valid ? &kCache.extra : nullptr);
 #endif
     return kCache.valid ? &kCache.extra : nullptr;
   }
-  extra::CityExtra found;
-  if (extra::PlayerExtras().FindCity(ref.player_id, ref.city_id, found)) {
-    kCache.generation = generation;
-    kCache.player_id = ref.player_id;
-    kCache.city_id = ref.city_id;
-    kCache.extra = found;
-    kCache.valid = true;
 #if defined(_DEBUG)
-    LogCityLookup(ref, generation, "table-hit", &kCache.extra);
+  const auto slow_start = std::chrono::steady_clock::now();
 #endif
-    return &kCache.extra;
-  }
-  // Miss: try a one-time hydration from the persisted AutoVariables. When it seeds, the generation
-  // is bumped; otherwise the negative result is cached for the current generation, so a city with
-  // no bonus does not retry the lookup on every CalculateYield call.
+  // Slow path: make sure the entry exists and was seeded from the persisted AutoVariables (this also
+  // reparents the entry when the owner changed), then cache the outcome.
   EnsureCityExtraHydrated(city, ref);
   const std::uint64_t generation_after = kTableGeneration.load(std::memory_order_acquire);
   kCache.generation = generation_after;
-  kCache.player_id = ref.player_id;
-  kCache.city_id = ref.city_id;
-  if (extra::PlayerExtras().FindCity(ref.player_id, ref.city_id, found)) {
+  kCache.city = city;
+  extra::CityExtra found;
+  if (extra::PlayerExtras().FindCity(city, found)) {
     kCache.extra = found;
     kCache.valid = true;
 #if defined(_DEBUG)
-    LogCityLookup(ref, generation_after, "hydrated", &kCache.extra);
+    LogCityLookup(ref, generation_after, "table-hit", &kCache.extra);
+    LogCityLookupSlow(ref, "table-hit", slow_start);
 #endif
     return &kCache.extra;
   }
@@ -185,6 +208,7 @@ const extra::CityExtra* LookupCityExtraForCity(void* city, const CityRef& ref) {
   kCache.valid = false;
 #if defined(_DEBUG)
   LogCityLookup(ref, generation_after, "miss", nullptr);
+  LogCityLookupSlow(ref, "miss", slow_start);
 #endif
   return nullptr;
 }
@@ -193,39 +217,48 @@ void EnsureCityExtraHydrated(void* city, const CityRef& ref) {
   if (city == nullptr || ref.player_id < 0 || ref.city_id < 0) {
     return;
   }
+  // Fast path: the entry exists, was seeded, and still belongs to the current owner.
   extra::CityExtra existing;
-  if (extra::PlayerExtras().FindCity(ref.player_id, ref.city_id, existing)) {
+  if (extra::PlayerExtras().FindCity(city, existing) && existing.hydrated &&
+      existing.owner_id == ref.player_id) {
+    return;
+  }
+  // The entry is keyed by the object pointer; the owner only decides which child table it lives in.
+  void* const player = PlayerForOwnerId(ref.player_id);
+  if (player == nullptr) {
+    // The owner could not be resolved yet (e.g. very early construction): leave the entry untouched
+    // and retry on a later read/write rather than creating it under the wrong owner.
     return;
   }
   std::array<std::int32_t, civ6::kMaxYields> percent{};
   std::array<std::int32_t, civ6::kMaxYields> per_suzerain{};
-  if (!LoadCityValues(city, percent.data(), per_suzerain.data())) {
-    return;
-  }
+#if defined(_DEBUG)
+  const long hydrate_n = ++kHydrateCalls;
+  const bool hydrate_report = hydrate_n <= 16 || (hydrate_n % 128) == 0;
+  const auto load_start = std::chrono::steady_clock::now();
+#endif
+  const bool loaded = LoadCityValues(city, percent.data(), per_suzerain.data());
   bool seeded = false;
   extra::PlayerExtras().EditCity(
-      ref.player_id, ref.city_id, ref.player_id, [&](extra::CityExtra& entry) {
-        // Only seed a brand-new entry (a concurrent hydration may have created it already).
-        for (const std::int32_t value : entry.percent) {
-          if (value != 0) {
-            return;
-          }
+      player, city, ref.city_id, ref.player_id, [&](extra::CityExtra& entry) {
+        if (entry.hydrated) {
+          // Already seeded (only the owner changed): EditCity has reparented it; nothing else to do.
+          return;
         }
-        for (const std::int32_t value : entry.per_suzerain_percent) {
-          if (value != 0) {
-            return;
+        if (loaded) {
+          entry.percent = percent;
+          entry.per_suzerain_percent = per_suzerain;
+          std::int32_t count = 0;
+          for (std::size_t i = 0; i < civ6::kMaxYields; ++i) {
+            if (percent[i] != 0 || per_suzerain[i] != 0) {
+              count = static_cast<std::int32_t>(i) + 1;
+            }
           }
+          entry.yield_count = count;
+          seeded = true;
         }
-        entry.percent = percent;
-        entry.per_suzerain_percent = per_suzerain;
-        std::int32_t count = 0;
-        for (std::size_t i = 0; i < civ6::kMaxYields; ++i) {
-          if (percent[i] != 0 || per_suzerain[i] != 0) {
-            count = static_cast<std::int32_t>(i) + 1;
-          }
-        }
-        entry.yield_count = count;
-        seeded = true;
+        // Mark as seeded even when nothing was stored, so the AutoVariable read does not run again.
+        entry.hydrated = true;
       });
   if (seeded) {
     static std::atomic<long> kSeedCount{0};
@@ -236,6 +269,16 @@ void EnsureCityExtraHydrated(void* city, const CityRef& ref) {
     }
     InvalidateCityExtraSnapshotCache();
   }
+#if defined(_DEBUG)
+  if (hydrate_report) {
+    const long long load_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                                  std::chrono::steady_clock::now() - load_start)
+                                  .count();
+    LogDebugF("city-yield: hydrate #%ld t_ms=%lld player=%d city=%d load_us=%lld seeded=%d",
+              hydrate_n, DebugElapsedMs(), ref.player_id, ref.city_id, load_us,
+              seeded ? 1 : 0);
+  }
+#endif
 }
 
 void InvalidateCityExtraSnapshotCache() {
@@ -271,10 +314,7 @@ int SuzerainCountForPlayer(std::int32_t player_id) {
   }
   // Prefer matching by +0xD8 (index != player type); on failure fall back to taking the real
   // player at that index.
-  void* player = PlayerById(player_id);
-  if (player == nullptr || !IsRealPlayer(player)) {
-    player = PlayerAtIndex(player_id);
-  }
+  void* player = PlayerForOwnerId(player_id);
   if (player == nullptr) {
     return -1;
   }

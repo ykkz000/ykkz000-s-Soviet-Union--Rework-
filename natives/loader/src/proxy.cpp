@@ -7,6 +7,8 @@
 
 #include <ykkz000/loader/internal.h>
 
+#include "serialization_trace.h"
+
 namespace ykkz000::loader {
 namespace {
 
@@ -86,6 +88,10 @@ bool initialize() {
   const bool handlerHookReady = installEffectHandlerHook();
   logInfoF("effect handler hook ready=%d", handlerHookReady ? 1 : 0);
 
+  // Serialization read trace (diagnostics, _DEBUG only): install after the GameCore entry points
+  // are resolved. The hooks are Loader-owned and never collide with plugin hooks.
+  installSerializationTrace();
+
   {
     LogScope s("build host interface");
     g_host.apiVersion = bridge::kHostApiVersion;
@@ -131,6 +137,7 @@ bool loaderInitialized() {
 
 void* createGameContext() {
   LogScope scope("create game context");
+  logDebugF("context: created t0");
   initializeLoaderOnce();
   // Notify plugins: a new context is being created. Plugins reinstall/re-enable their own hooks
   // here and clear caches that become invalid with the context; the Loader no longer recognizes any

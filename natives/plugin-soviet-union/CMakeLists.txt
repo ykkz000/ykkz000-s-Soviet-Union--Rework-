@@ -4,6 +4,7 @@ add_library(YKKZ000SovietUnionPlugin SHARED
   src/plugin.cpp
   src/core/engine_access.cpp
   src/gameplay/city_yield_common.cpp
+  src/gameplay/object_cleanup.cpp
   src/persistence/extra_persistence.cpp
   src/effects/adjust_city_yield_modifier_per_population.cpp
   src/effects/adjust_city_yield_modifier_per_suzerain.cpp

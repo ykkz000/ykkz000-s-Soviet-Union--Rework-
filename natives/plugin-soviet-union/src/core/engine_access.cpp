@@ -105,8 +105,21 @@ void* PlayerAtIndex(int index) {
   return begin[index];
 }
 
-void* PlayerById(int player_id) {
-  civ6::Player::Instance** begin = nullptr;
+void* PlayerForOwnerId(int player_id) {
+  if (player_id < 0 || player_id > kMaxPlausiblePlayerIndex) {
+    return nullptr;
+  }
+  // Prefer matching by +0xD8 (index != player type); on failure fall back to taking the real player
+  // at that index.
+  void* player = PlayerById(player_id);
+  if (player != nullptr && IsRealPlayer(player)) {
+    return player;
+  }
+  player = PlayerAtIndex(player_id);
+  return player != nullptr && IsRealPlayer(player) ? player : nullptr;
+}
+
+void* PlayerById(int player_id) {  civ6::Player::Instance** begin = nullptr;
   civ6::Player::Instance** end = nullptr;
   if (player_id < 0 || !GetPlayerVector(begin, end)) {
     return nullptr;

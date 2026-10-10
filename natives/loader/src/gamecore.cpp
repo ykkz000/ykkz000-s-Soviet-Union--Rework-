@@ -104,6 +104,11 @@ struct BuildProfile {
   // an object's own archive, and the aligned-free wrapper releases blocks from Platform::MallocTemp.
   std::ptrdiff_t rvaCityConstructor;
   std::ptrdiff_t rvaUnitConstructor;
+  // City/Unit destructors: void(void* object). The plugin hooks them to erase its side-table
+  // records when the engine destroys an object (city razing/capture, unit death/disband). The
+  // engine runs them during normal gameplay and while tearing down the game context.
+  std::ptrdiff_t rvaCityDestructor;
+  std::ptrdiff_t rvaUnitDestructor;
   std::ptrdiff_t rvaAutoVariableRegister;
   std::ptrdiff_t rvaEngineAlignedFree;
   // AutoVariable archive traversal observation (optional, diagnostics only): archive vtable slots
@@ -140,6 +145,11 @@ struct BuildProfile {
   std::ptrdiff_t rvaCitySerializeLoad;
   std::ptrdiff_t rvaUnitSerializeSave;
   std::ptrdiff_t rvaUnitSerializeLoad;
+  // Serialization read-trace helpers (optional, diagnostics only): the int-vector block serializer
+  // shared by save/load and the City yield int-vector loader. The _DEBUG read trace hooks these to
+  // record the values transferred so a stream-derailment point can be located from the crash dump.
+  std::ptrdiff_t rvaAutoVarIntArrayBlock;
+  std::ptrdiff_t rvaCityYieldIntVectorLoad;
   // Handler registration: the first three are code; the last two are data (the profiled handler
   // object/descriptor table, not runtime-validated, diagnostics only).
   std::ptrdiff_t rvaHandlerRegistryInit;
@@ -178,6 +188,8 @@ constexpr BuildProfile kKnownXp2Build{
     0x12FC10,     // TrackedValue::AddStep(this=modifier sub-object, step, u32, u32, tooltipKey)
     0x127DE0,     // City::Instance::Instance(self): registers the engine's AutoVariable members
     0x39B140,     // Unit::Instance::Instance(self): registers the engine's AutoVariable members
+    0x43940,      // City::Instance destructor(self): void(void*); deleting destructor calls it
+    0x39D6A0,     // Unit::Instance destructor(self): void(void*); deleting destructor calls it
     0x9953D0,     // FAutoArchive variable registration: void(variable, name, archive)
     0x036E20,     // _aligned_free wrapper: void(tag, pointer) (frees the second argument)
     0x44570,      // FAutoArchive vt[1]: lookup schema record by variable index (optional/diagnostic)
@@ -192,6 +204,8 @@ constexpr BuildProfile kKnownXp2Build{
     0x12C950,     // City::Instance deserialize (load): void*(stream, city)
     0x3A1220,     // Unit::Instance serialize (save): void*(stream, unit)
     0x39F670,     // Unit::Instance deserialize (load): void*(stream, unit)
+    0x260A10,     // int-vector block serializer (save/load); diagnostics trace only (optional)
+    0x0296F0,     // City yield int-vector loader (load); diagnostics trace only (optional)
     0x4891B0,     // FUN_1804891b0(void* root): builds the built-in handler registry
     0x6083F0,     // FUN_1806083f0(root, kind, hash, handlerObj): sets/replaces/removes a handler
     0x489040,     // FUN_180489040(container, outNode, hashPtr): handler table insert/lookup
@@ -396,6 +410,8 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   resolved.trackedValueAddStep = computeRva(kKnownXp2Build.rvaTrackedValueAddStep);
   resolved.cityConstructor = computeRva(kKnownXp2Build.rvaCityConstructor);
   resolved.unitConstructor = computeRva(kKnownXp2Build.rvaUnitConstructor);
+  resolved.cityDestructor = computeRva(kKnownXp2Build.rvaCityDestructor);
+  resolved.unitDestructor = computeRva(kKnownXp2Build.rvaUnitDestructor);
   resolved.autoVariableRegister = computeRva(kKnownXp2Build.rvaAutoVariableRegister);
   resolved.engineAlignedFree = computeRva(kKnownXp2Build.rvaEngineAlignedFree);
   resolved.autoVarLookupById = computeRva(kKnownXp2Build.rvaAutoVarLookupById);
@@ -412,6 +428,8 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   resolved.citySerializeLoad = computeRva(kKnownXp2Build.rvaCitySerializeLoad);
   resolved.unitSerializeSave = computeRva(kKnownXp2Build.rvaUnitSerializeSave);
   resolved.unitSerializeLoad = computeRva(kKnownXp2Build.rvaUnitSerializeLoad);
+  resolved.autoVarIntArrayBlock = computeRva(kKnownXp2Build.rvaAutoVarIntArrayBlock);
+  resolved.cityYieldIntVectorLoad = computeRva(kKnownXp2Build.rvaCityYieldIntVectorLoad);
   resolved.handlerRegistryInit = computeRva(kKnownXp2Build.rvaHandlerRegistryInit);
   resolved.setEffectHandler = computeRva(kKnownXp2Build.rvaSetEffectHandler);
   resolved.handlerNodeInsert = computeRva(kKnownXp2Build.rvaHandlerNodeInsert);
@@ -450,6 +468,10 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
          kKnownXp2Build.rvaCityConstructor);
   logRva("unitConstructor", resolved.unitConstructor, module,
          kKnownXp2Build.rvaUnitConstructor);
+  logRva("cityDestructor", resolved.cityDestructor, module,
+         kKnownXp2Build.rvaCityDestructor);
+  logRva("unitDestructor", resolved.unitDestructor, module,
+         kKnownXp2Build.rvaUnitDestructor);
   logRva("autoVariableRegister", resolved.autoVariableRegister, module,
          kKnownXp2Build.rvaAutoVariableRegister);
   logRva("engineAlignedFree", resolved.engineAlignedFree, module,
@@ -478,6 +500,10 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
          kKnownXp2Build.rvaUnitSerializeSave);
   logRva("unitSerializeLoad", resolved.unitSerializeLoad, module,
          kKnownXp2Build.rvaUnitSerializeLoad);
+  logRva("autoVarIntArrayBlock", resolved.autoVarIntArrayBlock, module,
+         kKnownXp2Build.rvaAutoVarIntArrayBlock);
+  logRva("cityYieldIntVectorLoad", resolved.cityYieldIntVectorLoad, module,
+         kKnownXp2Build.rvaCityYieldIntVectorLoad);
   logRva("handlerRegistryInit", resolved.handlerRegistryInit, module,
          kKnownXp2Build.rvaHandlerRegistryInit);
   logRva("setEffectHandler", resolved.setEffectHandler, module,
@@ -584,6 +610,10 @@ void publishEngineApi(const GameCoreApi& api) {
   engine.citySerializeLoad = api.citySerializeLoad;                           // added in v13
   engine.unitSerializeSave = api.unitSerializeSave;                           // added in v13
   engine.unitSerializeLoad = api.unitSerializeLoad;                           // added in v13
+  engine.cityDestructor = api.cityDestructor;                                 // added in v14
+  engine.unitDestructor = api.unitDestructor;                                 // added in v14
+  engine.autoVarIntArrayBlock = api.autoVarIntArrayBlock;                     // added in v15
+  engine.cityYieldIntVectorLoad = api.cityYieldIntVectorLoad;                 // added in v15
   engine.getPlayer = api.getPlayerByIndex;
   engine.getGameManager = api.getGameManager;
   g_engineApi = engine;

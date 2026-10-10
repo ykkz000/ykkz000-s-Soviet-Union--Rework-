@@ -12,6 +12,7 @@
 #include <ykkz000/extra/player_extra.h>
 
 #include <ykkz000/plugin/engine_access.h>
+#include <ykkz000/plugin/object_cleanup.h>
 
 // Unit strength modifier of "per suzerain city x Amount".
 //
@@ -178,11 +179,11 @@ void StrengthAccumulate_Hook(civ6::GameEffects::ProposedCombat* target, int play
   }
   // Prefer the unit side table (the authoritative per-suzerain value = sum over instances); if the
   // table has not been built yet (before the first Apply) or the module is disabled, fall back to the
-  // template Amount so behavior is unchanged.
+  // template Amount so behavior is unchanged. The lookup is keyed by the unit pointer, so it is
+  // unaffected by an owner change or a unit-id recycle.
   int per_suzerain = amount;
-  if (kWindowUnitId >= 0) {
-    const std::int32_t stored =
-        extra::PlayerExtras().FindUnitStrength(player_id, kWindowUnitId);
+  if (kWindowUnit != nullptr) {
+    const std::int32_t stored = extra::PlayerExtras().FindUnitStrength(kWindowUnit);
     if (stored != 0) {
       per_suzerain = stored;
       if (per_suzerain != amount) { // Normal case of multi-instance aggregation
@@ -203,8 +204,7 @@ void StrengthAccumulate_Hook(civ6::GameEffects::ProposedCombat* target, int play
   } else {
     static std::atomic<bool> kLoggedNoUnitId{false};
     if (!kLoggedNoUnitId.exchange(true)) {
-      LogWarnF("strength: unit id unavailable (unit=%p); unit side table not used",
-               kWindowUnit);
+      LogWarn("strength: unit pointer unavailable; unit side table not used");
     }
   }
   const long long scaled = static_cast<long long>(per_suzerain) * count;
@@ -304,6 +304,7 @@ std::uint64_t ApplyPerSuzerain(void* self, void* a1, void* a2, void* a3, int sig
   const int delta = kScaledDelta;
   const int window_player = kWindowPlayerId;
   const std::int32_t window_unit_id = kWindowUnitId;
+  void* const window_unit = kWindowUnit;
   CloseWindow(previous);
 
   if (writes == 0) {
@@ -320,26 +321,30 @@ std::uint64_t ApplyPerSuzerain(void* self, void* a1, void* a2, void* a3, int sig
     return result;
   }
   // Maintain the unit side table: Apply upserts / Remove erases, then recompute the aggregate (sum).
-  if (window_unit_id >= 0) {
+  // The table is keyed by the unit pointer, so the entry always survives for the unit's lifetime
+  // (it is dropped only by the Unit destructor hook).
+  if (window_unit != nullptr) {
     std::int32_t amount = 0;
     if (TryRead(self, &civ6::AdjustPlayerStrengthModifier::amount, amount)) {
-      if (sign < 0) {
-        extra::PlayerExtras().EditUnit(window_player, window_unit_id,
-                                       [&](extra::UnitExtra& unit) {
-                                         unit.instances.erase(self);
-                                         RecomputeStrength(unit);
-                                       });
-        extra::PlayerExtras().EraseIfEmptyUnit(window_player, window_unit_id);
-      } else {
-        extra::PlayerExtras().EditUnit(window_player, window_unit_id,
-                                       [&](extra::UnitExtra& unit) {
-                                         unit.instances[self] = amount;
-                                         RecomputeStrength(unit);
-                                       });
-        static std::atomic<bool> kLoggedFirstExtra{false};
-        if (!kLoggedFirstExtra.exchange(true)) {
-          LogInfoF("strength: extra per-suzerain=%d for player=%d unit=%d (self=%p)",
-               amount, window_player, window_unit_id, self);
+      void* const owner_player = PlayerForOwnerId(window_player);
+      if (owner_player != nullptr) {
+        if (sign < 0) {
+          extra::PlayerExtras().EditUnit(owner_player, window_unit, window_unit_id, window_player,
+                                         [&](extra::UnitExtra& unit) {
+                                           unit.instances.erase(self);
+                                           RecomputeStrength(unit);
+                                         });
+        } else {
+          extra::PlayerExtras().EditUnit(owner_player, window_unit, window_unit_id, window_player,
+                                         [&](extra::UnitExtra& unit) {
+                                           unit.instances[self] = amount;
+                                           RecomputeStrength(unit);
+                                         });
+          static std::atomic<bool> kLoggedFirstExtra{false};
+          if (!kLoggedFirstExtra.exchange(true)) {
+            LogInfoF("strength: extra per-suzerain=%d for player=%d unit=%d (self=%p)",
+                 amount, window_player, window_unit_id, self);
+          }
         }
       }
     } else {
@@ -427,14 +432,19 @@ void UninstallHook() {
   extra::PlayerExtras().Clear();
 }
 
-// Context lifecycle: enable the hook on created; disable and clear the cache on destroyed.
+// Context lifecycle: enable the hook on created; disable and clear the cache on destroyed. The
+// object-destruction cleanup hooks are installed alongside the write-point hook so a unit destroyed
+// without a template Remove (death/disband) still drops its side-table entry.
 void OnContext(bridge::GameContextEvent event, void* /*context*/) {
   if (event == bridge::GameContextEvent::kCreated) {
     (void)InstallHooksOnce();
+    (void)EnsureObjectCleanupHooks();
     ResetWindow();
     extra::PlayerExtras().Clear(); // New context: old player/city/unit keys are all invalid
     return;
   }
+  // Remove the destructor hooks first (the context has already been torn down) before clearing.
+  RemoveObjectCleanupHooks();
   UninstallHook();
 }
 

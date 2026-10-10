@@ -43,4 +43,11 @@ void PersistCityValues(void* city, const std::int32_t* percent, const std::int32
 [[nodiscard]] bool LoadCityValues(void* city, std::int32_t* percent_out,
                                   std::int32_t* per_suzerain_out);
 
+/// @brief Erases the lookup record for a destroyed city without touching engine memory.
+/// @param[in] city City instance pointer (the map key).
+/// @note Called from the City destructor hook: the variable objects and their data buffers are owned
+///       by the engine's archive/descriptor destruction path, so erasing the map record is all that
+///       is required (and safe). No-op when the pointer is null or there is no record.
+void ForgetCityVars(void* city);
+
 } // namespace ykkz000::plugin

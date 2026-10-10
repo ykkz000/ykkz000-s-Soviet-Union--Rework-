@@ -1,5 +1,6 @@
 #include <windows.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -39,6 +40,18 @@ struct CloneRecord {
 
 std::mutex g_cloneMutex;
 std::vector<CloneRecord> g_clones;
+
+#if defined(_DEBUG)
+// Diagnostic counter: confirms whether the clone list grows without bound over a long session (the
+// main suspect for memory pressure that slows down or crashes a load).
+std::atomic<long> g_patchCalls{0};
+
+// Copies the clone count under its own lock; the caller logs after the lock is released.
+std::size_t cloneCount() {
+  std::lock_guard<std::mutex> guard(g_cloneMutex);
+  return g_clones.size();
+}
+#endif
 
 } // namespace
 
@@ -146,6 +159,12 @@ void* patchEffectObjectSlots(void* effectObject, std::uint32_t typeHash) {
             "applySlot=%zX removeSlot=%zX",
             typeHash, impl.label != nullptr ? impl.label : "(none)", block, clone, applySlot,
             removeSlot);
+#if defined(_DEBUG)
+  const long patch_n = ++g_patchCalls;
+  if (patch_n <= 16 || (patch_n % 256) == 0) {
+    logDebugF("custom: vtable patches=%ld clones=%zu", patch_n, cloneCount());
+  }
+#endif
   *reinterpret_cast<void***>(effectObject) = clone;
   return block;
 }

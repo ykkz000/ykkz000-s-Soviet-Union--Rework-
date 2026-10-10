@@ -79,6 +79,15 @@ struct GameCoreApi {
   void*   cityConstructor = nullptr;
   /// @brief Unit::Instance constructor: void*(void* self).
   void*   unitConstructor = nullptr;
+  /// @note City/Unit destructors (optional, non-fatal: when either is missing, the corresponding
+  ///       cleanup hook is skipped and side-table records are reclaimed only at context switches).
+  ///       The plugin hooks them to erase its side-table records when the engine destroys an
+  ///       object (city razing/capture, unit death/disband); the engine runs them during normal
+  ///       gameplay and while tearing down the game context.
+  /// @brief City::Instance destructor: void(void* self).
+  void*   cityDestructor = nullptr;
+  /// @brief Unit::Instance destructor: void(void* self).
+  void*   unitDestructor = nullptr;
   /// @brief FAutoArchive variable registration helper:
   ///       void(void* variable, const void* name, void* archive).
   void*   autoVariableRegister = nullptr;
@@ -120,6 +129,17 @@ struct GameCoreApi {
   void*   citySerializeLoad = nullptr;
   void*   unitSerializeSave = nullptr;
   void*   unitSerializeLoad = nullptr;
+  /// @note Serialization read tracing (optional, diagnostics only: when missing, the corresponding
+  ///       observation hook is skipped and gameplay/persistence are unaffected). The read trace
+  ///       records the values these helpers transfer so a stream-derailment point can be located
+  ///       from the crash dump (see serialization_trace.cpp).
+  /// @brief Int-vector block serializer shared by save/load: it transfers a count through stream
+  ///       vtable slot +0x28, then (key, value) pairs, writing the values into the data buffer.
+  ///       Signature: std::uint64_t (void* stream, void* data, void* yieldKeyList). RVA 0x260A10.
+  void*   autoVarIntArrayBlock = nullptr;
+  /// @brief City yield int-vector loader (load-only). Signature:
+  ///       void (void* stream, void* yieldVector, char flag). RVA 0x0296F0.
+  void*   cityYieldIntVectorLoad = nullptr;
   /// @note Handler registration entries: handlerRegistryInit/setEffectHandler/handlerNodeInsert are
   ///       code. FUN_1804891b0(root) builds the built-in handler tables.
   void*   handlerRegistryInit = nullptr;

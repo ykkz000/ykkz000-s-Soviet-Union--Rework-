@@ -12,6 +12,7 @@ add_library(YKKZ000Loader SHARED
   src/effect_handler.cpp
   src/memory_probe.cpp
   src/crash_capture.cpp
+  src/serialization_trace.cpp
   src/plugin_manager.cpp
   resource.rc
   loader.def)

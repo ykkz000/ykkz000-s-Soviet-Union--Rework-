@@ -43,13 +43,17 @@ void ApplyPerSuzerainEntries(void* self, void* city, int sign) {
   if (!CityRefOf(city, ref)) {
     return;
   }
+  void* const player = PlayerForOwnerId(ref.player_id);
+  if (player == nullptr) {
+    return;
+  }
   constexpr std::int64_t kPercentMin = std::numeric_limits<std::int32_t>::min();
   constexpr std::int64_t kPercentMax = std::numeric_limits<std::int32_t>::max();
   // Seed from the persisted AutoVariables after a load before the incremental add (see the
   // per-population module for the rationale).
   EnsureCityExtraHydrated(city, ref);
   extra::PlayerExtras().EditCity(
-      ref.player_id, ref.city_id, ref.player_id, [&](extra::CityExtra& extra) {
+      player, city, ref.city_id, ref.player_id, [&](extra::CityExtra& extra) {
         for (const EffectEntry& entry : entries) {
           if (entry.yield_type < 0 ||
               entry.yield_type >= static_cast<int>(civ6::kMaxYields)) {
@@ -80,9 +84,7 @@ void ApplyPerSuzerainEntries(void* self, void* city, int sign) {
   // and send a zero-delta "yield changed" notification, and invalidate the TLS snapshot (EditCity
   // already wrote, so the read path must see the new value).
   InvalidateAndNotifyCityYield(city, entries);
-  if (sign < 0) {
-    extra::PlayerExtras().EraseIfEmptyCity(ref.player_id, ref.city_id);
-  }
+  // The entry is never erased on a zeroing Remove: extensions exist for every live city.
   InvalidateCityExtraSnapshotCache();
 }
 

@@ -98,6 +98,20 @@ bool isPlausiblePointer(const void* pointer) {
   return reinterpret_cast<std::uintptr_t>(pointer) > 0x10000;
 }
 
+// Snapshot of the handler caches for diagnostics: the sizes are copied under g_handlerMutex and the
+// caller logs after the lock is released (never nest the log lock inside the business lock).
+struct HandlerTableSizes {
+  std::size_t templates = 0;
+  std::size_t customs = 0;
+  std::size_t originals = 0;
+};
+
+HandlerTableSizes handlerTableSizes() {
+  std::lock_guard<std::mutex> guard(g_handlerMutex);
+  return HandlerTableSizes{g_templateNodes.size(), g_customHandlerObjects.size(),
+                           g_handlerOriginals.size()};
+}
+
 // FUN_1806083f0(root, 2, hash, handler)'s first batch of memory accesses: root+0x08/+0x18/+0x30,
 // plus the bucket array *(root+0x18), length (mask+1)*0x10, mask = *(root+0x30).
 // If any of these does not hold, the root is treated as stale and never handed to the engine
@@ -176,8 +190,11 @@ int registerCustomEffectHandlersForRoot(void* root);
 void SetEffectHandler_Hook(void* root, int kind, std::uint32_t hash, void* handlerObject) {
   const long call = ++s_setCalls;
   if (call <= kTraceFullCalls || (call % kTraceStride) == 0) {
-    logDebugF("set: call#%ld root=%p kind=%d hash=0x%08X handler=%p", call, root, kind,
-              hash, handlerObject);
+    const HandlerTableSizes sizes = handlerTableSizes();
+    logDebugF("set: call#%ld root=%p kind=%d hash=0x%08X handler=%p templates=%zu customs=%zu "
+              "originals=%zu",
+              call, root, kind, hash, handlerObject, sizes.templates, sizes.customs,
+              sizes.originals);
   }
   // Let the engine's own registration take effect first, then mirror the re-registration, to avoid
   // modifying the same container during its internal iteration.
@@ -379,7 +396,9 @@ void* customEffectHandlerObject(std::uint32_t effectHash, std::uint32_t template
 void* TemplateAnalyze_Hook(void* self, void* args) {
   const long call = ++s_analyzeCalls;
   if (call <= kTraceFullCalls || (call % kTraceStride) == 0) {
-    logDebugF("analyze: call#%ld self=%p args=%p", call, self, args);
+    const HandlerTableSizes sizes = handlerTableSizes();
+    logDebugF("analyze: call#%ld self=%p args=%p templates=%zu customs=%zu originals=%zu", call,
+              self, args, sizes.templates, sizes.customs, sizes.originals);
   }
   return g_originalTemplateAnalyze != nullptr ? g_originalTemplateAnalyze(self, args) : nullptr;
 }
@@ -401,9 +420,12 @@ std::uint64_t TemplateApply_Hook(void* self, void* context, void* args) {
         population = readInt32(city, offsetof(civ6::City::Instance, population));
       }
     }
+    const HandlerTableSizes sizes = handlerTableSizes();
     logDebugF(
-                "apply: call#%ld self=%p context=%p args=%p amount=%d yield=%d city=%p pop=%d",
-                call, self, context, args, amount, yieldType, city, population);
+                "apply: call#%ld self=%p context=%p args=%p amount=%d yield=%d city=%p pop=%d "
+                "templates=%zu customs=%zu originals=%zu",
+                call, self, context, args, amount, yieldType, city, population, sizes.templates,
+                sizes.customs, sizes.originals);
   }
   return g_originalTemplateApply != nullptr ? g_originalTemplateApply(self, context, args) : 0;
 }
@@ -500,6 +522,10 @@ int registerCustomEffectHandlersForRoot(void* root) {
     ++count;
   }
   logInfoF("handler: registration complete root=%p count=%d", root, count);
+  {
+    const HandlerTableSizes sizes = handlerTableSizes();
+    logInfoF("handler: register root=%p count=%d templates=%zu", root, count, sizes.templates);
+  }
   return count;
 }
 

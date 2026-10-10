@@ -13,7 +13,7 @@ namespace ykkz000::bridge {
 /// @note Evolves under an "append-only" policy: new fields may only be appended, and the meaning
 ///       of existing fields never changes; plugins use this to decide whether the host supports
 ///       the capabilities they need.
-inline constexpr std::uint32_t kHostApiVersion = 13;
+inline constexpr std::uint32_t kHostApiVersion = 15;
 
 struct Host;
 
@@ -181,6 +181,27 @@ struct EngineApi {
   void* citySerializeLoad;
   void* unitSerializeSave;
   void* unitSerializeLoad;
+
+  /// @note Added in v14 (append-only): City/Unit destructor entry points. The plugin hooks them to
+  ///       erase its side-table records when the engine destroys an object (city razing/capture,
+  ///       unit death/disband). The engine runs these destructors during normal gameplay and while
+  ///       tearing down the game context, so the hooks also observe teardown destruction as long as
+  ///       they are removed only after the real context destroy.
+  /// @brief City::Instance destructor: void(void* city).
+  void* cityDestructor;
+  /// @brief Unit::Instance destructor: void(void* unit).
+  void* unitDestructor;
+
+  /// @note Added in v15 (append-only): serialization read-trace entries (diagnostics only; consumed
+  ///       by the Loader's own _DEBUG serialization trace). Plugins do not need them and may ignore
+  ///       them; the fields are resolved on the Loader side regardless.
+  /// @brief Int-vector block serializer shared by save/load. It transfers a count through stream
+  ///       vtable slot +0x28, then (key, value) pairs, writing values into the data buffer.
+  ///       Signature: std::uint64_t (void* stream, void* data, void* yieldKeyList). RVA 0x260A10.
+  void* autoVarIntArrayBlock;
+  /// @brief City yield int-vector loader (load-only). Signature:
+  ///       void (void* stream, void* yieldVector, char flag). RVA 0x0296F0.
+  void* cityYieldIntVectorLoad;
 };
 
 /// @brief Install a hook.

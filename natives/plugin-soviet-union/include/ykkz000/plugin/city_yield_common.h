@@ -22,8 +22,8 @@ struct EffectEntry {
 
 /// @brief Side-table key derived from a city instance (reads City+0xD8 player / City+0xA8 city
 ///        id and sanity-checks them).
-/// @note The top-level key is the player owning the city (PlayerExtras isolates duplicate
-///       civilizations/leaders per player).
+/// @note The key is **not** the table key anymore (entries are keyed by the City pointer); it only
+///       carries the current owner id for suzerain-count resolution and the city id for diagnostics.
 struct CityRef {
   std::int32_t player_id = -1;
   std::int32_t city_id = -1;
@@ -69,23 +69,24 @@ void NotifyCityYieldChanged(void* city, int yield_type);
 /// @note Call after Apply/Remove to refresh the engine caches.
 void InvalidateAndNotifyCityYield(void* city, const std::vector<EffectEntry>& entries);
 
-/// @brief Read-path TLS snapshot: consecutive lookups of the same key hit directly; on a miss it
-///        queries the table, attempts a one-time hydration from the city's persisted AutoVariables
-///        (see extra_persistence.h), and caches the outcome (including a negative result).
-/// @param[in] city City instance (used only to locate the persisted AutoVariables on a miss).
-/// @param[in] ref Side-table key resolved from the city.
+/// @brief Read-path TLS snapshot: consecutive lookups of the same city hit directly; on a miss it
+///        ensures the entry exists, seeds it once from the city's persisted AutoVariables (see
+///        extra_persistence.h), and caches the outcome (including a negative result).
+/// @param[in] city City instance (the side-table key).
+/// @param[in] ref Owner/city-id snapshot (used for owner resolution, diagnostics, and hydrate).
 /// @return Side-table entry pointer on hit, nullptr when there is no entry.
-/// @note The cache identity is the side-table key (player id + city id, not the city pointer); a
-///       write (Apply/Remove) bumps the generation and invalidates the negative cache.
+/// @note The cache identity is the city object pointer, so a capture that only changes the owner
+///       keeps the same result; a write (Apply/Remove) bumps the generation and invalidates it.
 [[nodiscard]] const extra::CityExtra* LookupCityExtraForCity(void* city, const CityRef& ref);
 
 /// @brief Seeds the side-table entry from the city's persisted AutoVariables when the entry does
-///        not exist yet (e.g. right after a savegame load, where the engine does not replay Apply).
+///        not exist yet or has not been seeded (e.g. right after a savegame load, where the engine
+///        does not replay Apply).
 /// @param[in] city City instance.
-/// @param[in] ref Side-table key resolved from the city.
-/// @note No-op when persistence is inactive or the table entry already exists. Call before the
-///       first EditCity of a city (in the read path and before Apply/Remove) so a later incremental
-///       Apply adds on top of the restored values instead of resetting them.
+/// @param[in] ref Owner/city-id snapshot resolved from the city.
+/// @note No-op when persistence is inactive or the entry is already seeded for the current owner.
+///       Call before the first EditCity of a city (in the read path and before Apply/Remove) so a
+///       later incremental Apply adds on top of the restored values instead of resetting them.
 void EnsureCityExtraHydrated(void* city, const CityRef& ref);
 
 /// @brief Post-write side-table invalidation: bumps the write generation (invalidating all

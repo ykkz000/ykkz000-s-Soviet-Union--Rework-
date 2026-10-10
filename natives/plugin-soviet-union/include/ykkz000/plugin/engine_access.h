@@ -211,6 +211,13 @@ bool TryWriteAt(void* base, std::size_t offset, const T& value) {
 /// @param[in] index Vector index.
 /// @return The player pointer on a hit, otherwise nullptr.
 [[nodiscard]] void* PlayerAtIndex(int index);
+/// @brief Resolves a player type/id into the real player instance.
+/// @param[in] player_id Player type/id (Player::Instance +0xD8 value).
+/// @return The player pointer on a hit, otherwise nullptr.
+/// @note Prefers matching by +0xD8 (index != player type) and falls back to the player vector at
+///       that index. This is the "owner id -> Player::Instance*" bridge used by the pointer-keyed
+///       extension tables.
+[[nodiscard]] void* PlayerForOwnerId(int player_id);
 /// @brief Resolves any object that "carries a player-type field" into a real player.
 /// @param[in] object Candidate object.
 /// @param[out] via Returns how the match was made, for diagnostics.
