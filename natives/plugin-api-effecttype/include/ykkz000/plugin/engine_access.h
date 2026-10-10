@@ -9,79 +9,69 @@
 #include <ykkz000/civ6/game_manager.h>
 #include <ykkz000/civ6/player.h>
 #include <ykkz000/civ6/unit.h>
+#include <ykkz000/plugin/effecttype_api.h>
 
 /// @file engine_access.h
-/// @brief Plugin-side engine access layer.
-/// @note Wraps the host services (validated reads/writes, player/city resolution) into type-safe
-///       accessors. The Loader no longer recognizes any concrete behavior, and every engine read
-///       must go through validation such as host->readField. Pointers handed out by the engine are
-///       always treated as untrusted: run a readability/candidate check first, skip on failure, and
-///       never write to an unvalidated address.
+/// @brief Consumer-side engine access layer over the effecttype API.
+/// @note The heavy lifting (host/context access, validated reads/writes, player resolution) lives in
+///       the ykkz000_plugin_api_effecttype plugin; this header provides the type-safe inline
+///       wrappers and member-access templates consumers use. Every engine read must be validated
+///       (host->readField / isReadableRegion); engine pointers are always treated as untrusted.
 namespace ykkz000::plugin {
 
-/// @brief Runtime defensive bounds.
-/// @note A sudden jump in entry count or an absurd population/player index is usually a symptom of
-///       an invalid self/city pointer; in that case it is better to skip the write than to corrupt a
-///       garbage address.
-inline constexpr int kMaxEffectEntries = 64;
-inline constexpr int kMaxPlausiblePopulation = 100000;
-inline constexpr int kMaxPlausiblePlayerIndex = 255;
-inline constexpr int kMaxPlausibleSuzerainCount = 128;
-
-/// @brief Plugin global context: host services and engine entry points (set in GetPlugin).
-struct PluginContext {
-  const bridge::Host* host = nullptr;
-  const bridge::EngineApi* engine = nullptr;
-};
+/// @brief Gets the plugin context captured through the effecttype API.
+/// @return The PluginContext reference (an empty context before SetContext).
+[[nodiscard]] inline const PluginContext& Context() {
+  static const PluginContext kEmpty{};
+  const PluginContext* context = Api()->get_context();
+  return context != nullptr ? *context : kEmpty;
+}
 
 /// @brief Sets the plugin global context.
 /// @param[in] host Host service table.
-void SetContext(const bridge::Host* host);
-/// @brief Gets the plugin global context.
-/// @return The PluginContext reference.
-[[nodiscard]] const PluginContext& Context();
-
-/// @brief Emits one log line.
-/// @param[in] level Log level.
-/// @param[in] message Text.
-void Log(int level, const char* message);
-/// @brief Formats and emits one log line (printf style).
-/// @param[in] level Log level.
-/// @param[in] format Format string.
-/// @param[in] ... Format arguments.
-void LogF(int level, const char* format, ...);
+inline void SetContext(const bridge::Host* host) { Api()->set_context(host); }
 
 // -- Level wrappers --
-// Zero-overhead level macros mirroring the Loader's. TRACE is never used; DEBUG is compiled out
-// entirely unless _DEBUG is defined (so its formatting arguments are not evaluated). Plugin
-// logs are forwarded through host->log, where the Loader applies the runtime filter.
+// Zero-overhead level macros. TRACE is never used; DEBUG is compiled out entirely unless _DEBUG is
+// defined (so its formatting arguments are not evaluated). Plugin logs are forwarded through the
+// API, which relays them to host->log where the Loader applies the runtime filter.
 #define LogTrace(message) ((void)0)
 #define LogTraceF(...) ((void)0)
 #if defined(_DEBUG)
 #define LogDebug(message) \
-  Log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kDebug), (message))
-#define LogDebugF(...) \
-  LogF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kDebug), __VA_ARGS__)
+  (::ykkz000::plugin::Api()->log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kDebug), \
+                                 (message)))
+#define LogDebugF(...)                                                                          \
+  (::ykkz000::plugin::Api()->logf(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kDebug), \
+                                  __VA_ARGS__))
 #else
 #define LogDebug(message) ((void)0)
 #define LogDebugF(...) ((void)0)
 #endif
 #define LogInfo(message) \
-  Log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kInfo), (message))
-#define LogInfoF(...) \
-  LogF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kInfo), __VA_ARGS__)
+  (::ykkz000::plugin::Api()->log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kInfo), \
+                                 (message)))
+#define LogInfoF(...)                                                                          \
+  (::ykkz000::plugin::Api()->logf(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kInfo), \
+                                  __VA_ARGS__))
 #define LogWarn(message) \
-  Log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kWarning), (message))
-#define LogWarnF(...) \
-  LogF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kWarning), __VA_ARGS__)
+  (::ykkz000::plugin::Api()->log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kWarning), \
+                                 (message)))
+#define LogWarnF(...)                                                                          \
+  (::ykkz000::plugin::Api()->logf(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kWarning), \
+                                  __VA_ARGS__))
 #define LogError(message) \
-  Log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kError), (message))
-#define LogErrorF(...) \
-  LogF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kError), __VA_ARGS__)
+  (::ykkz000::plugin::Api()->log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kError), \
+                                 (message)))
+#define LogErrorF(...)                                                                          \
+  (::ykkz000::plugin::Api()->logf(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kError), \
+                                  __VA_ARGS__))
 #define LogFatal(message) \
-  Log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kFatal), (message))
-#define LogFatalF(...) \
-  LogF(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kFatal), __VA_ARGS__)
+  (::ykkz000::plugin::Api()->log(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kFatal), \
+                                 (message)))
+#define LogFatalF(...)                                                                          \
+  (::ykkz000::plugin::Api()->logf(::ykkz000::bridge::ToInt(::ykkz000::bridge::LogLevel::kFatal), \
+                                  __VA_ARGS__))
 
 // -- Member access layer: member reference -> offset; every read is validated via host->readField --
 
@@ -180,11 +170,16 @@ bool TryWriteAt(void* base, std::size_t offset, const T& value) {
 /// @param[in] address Start address.
 /// @param[in] bytes Length.
 /// @return true when readable.
-[[nodiscard]] bool IsReadable(const void* address, std::size_t bytes);
+[[nodiscard]] inline bool IsReadable(const void* address, std::size_t bytes) {
+  return Api()->is_readable(address, bytes) != 0;
+}
+
 /// @brief Determines whether a pointer looks like a dereferenceable object.
 /// @param[in] pointer Pointer to test.
 /// @return true when it looks like a candidate object.
-[[nodiscard]] bool IsCandidateObject(const void* pointer);
+[[nodiscard]] inline bool IsCandidateObject(const void* pointer) {
+  return Api()->is_candidate_object(pointer) != 0;
+}
 
 // -- Player access --
 // The engine does not store a "suzerain count" on the player: the suzerain relation lives on each
@@ -195,37 +190,58 @@ bool TryWriteAt(void* base, std::size_t offset, const T& value) {
 /// @param[out] begin Vector first pointer.
 /// @param[out] end Vector past-the-end pointer.
 /// @return true on success.
-[[nodiscard]] bool GetPlayerVector(civ6::Player::Instance**& begin,
-                                   civ6::Player::Instance**& end);
-/// @brief Whether the candidate is a member of the player vector (exact match, ruling out the
-///   "readable therefore valid" false positive).
+[[nodiscard]] inline bool GetPlayerVector(civ6::Player::Instance**& begin,
+                                          civ6::Player::Instance**& end) {
+  void* raw_begin = nullptr;
+  void* raw_end = nullptr;
+  if (Api()->get_player_vector(&raw_begin, &raw_end) == 0) {
+    return false;
+  }
+  begin = reinterpret_cast<civ6::Player::Instance**>(raw_begin);
+  end = reinterpret_cast<civ6::Player::Instance**>(raw_end);
+  return true;
+}
+
+/// @brief Whether the candidate is a member of the player vector.
 /// @param[in] candidate Candidate pointer.
 /// @return true when it is a member of the player vector.
-[[nodiscard]] bool IsRealPlayer(const void* candidate);
+[[nodiscard]] inline bool IsRealPlayer(const void* candidate) {
+  return Api()->is_real_player(candidate) != 0;
+}
+
 /// @brief Exact lookup in the player vector by the player type at +0xD8.
 /// @param[in] player_id Player type id.
 /// @return The player pointer on a hit, otherwise nullptr.
-/// @note The index is not guaranteed to equal the player type.
-[[nodiscard]] void* PlayerById(int player_id);
+[[nodiscard]] inline void* PlayerById(int player_id) { return Api()->player_by_id(player_id); }
+
 /// @brief Takes a player directly by index (bounds strictly limited to the player vector).
 /// @param[in] index Vector index.
 /// @return The player pointer on a hit, otherwise nullptr.
-[[nodiscard]] void* PlayerAtIndex(int index);
+[[nodiscard]] inline void* PlayerAtIndex(int index) { return Api()->player_at_index(index); }
+
 /// @brief Resolves a player type/id into the real player instance.
 /// @param[in] player_id Player type/id (Player::Instance +0xD8 value).
 /// @return The player pointer on a hit, otherwise nullptr.
-/// @note Prefers matching by +0xD8 (index != player type) and falls back to the player vector at
-///       that index. This is the "owner id -> Player::Instance*" bridge used by the pointer-keyed
-///       extension tables.
-[[nodiscard]] void* PlayerForOwnerId(int player_id);
+[[nodiscard]] inline void* PlayerForOwnerId(int player_id) {
+  return Api()->player_for_owner_id(player_id);
+}
+
 /// @brief Resolves any object that "carries a player-type field" into a real player.
 /// @param[in] object Candidate object.
 /// @param[out] via Returns how the match was made, for diagnostics.
 /// @return The player pointer on a hit, otherwise nullptr.
-[[nodiscard]] void* ResolvePlayerFromObject(const void* object, const char*& via);
+[[nodiscard]] inline void* ResolvePlayerFromObject(const void* object, const char*& via) {
+  const char* raw_via = "none";
+  void* player = Api()->resolve_player_from_object(object, &raw_via);
+  via = raw_via;
+  return player;
+}
+
 /// @brief Counts the number of city-states suzerained by one player.
 /// @param[in] player Player pointer.
 /// @return The suzerain city count; -1 when any step is untrustworthy.
-[[nodiscard]] int CountSuzerainsOfPlayer(void* player);
+[[nodiscard]] inline int CountSuzerainsOfPlayer(void* player) {
+  return Api()->count_suzerains_of_player(player);
+}
 
 } // namespace ykkz000::plugin

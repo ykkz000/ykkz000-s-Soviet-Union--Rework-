@@ -10,7 +10,6 @@
 
 #include <ykkz000/plugin/city_yield_common.h>
 #include <ykkz000/plugin/engine_access.h>
-#include <ykkz000/plugin/extra_persistence.h>
 
 // City-yield modifier of "per suzerain city x Amount%" (multiply by suzerain count at read time).
 //

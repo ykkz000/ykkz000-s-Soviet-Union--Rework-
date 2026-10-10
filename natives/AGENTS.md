@@ -74,6 +74,22 @@
 - 对于游戏内容相关的具体实现**禁止**放在主入口，**必须**提供单独的头文件和源文件
 - 对于DLL导出的符号，应当使用`export.h`中的`YKKZ000_PLUGIN_API`宏（展开为`extern "C" __declspec(dllexport)`）导出
 
+##### 插件清单与依赖规范
+
+- 每个插件**必须**导出`GetPluginManifest`（返回`ykkz000::bridge::PluginManifest`的常驻POD），声明唯一逻辑名`name`、依赖插件名数组`dependencies`、以及所需的最低Host API版本`requiredHostApi`
+- 插件**必须**通过`PluginManifest.name`标识自身；该名称在依赖拓扑中唯一，**禁止**依赖文件名或扫描顺序
+- 依赖关系**必须**按逻辑名声明；Loader 会校验缺失依赖、重复名称、依赖环与`requiredHostApi`，并在初始化前按依赖拓扑排序
+- 初始化遵循**两阶段**：先加载全部候选DLL，再按拓扑序调用`GetPlugin`；因此依赖插件（如 API 插件）先初始化，consumer 后初始化
+- 卸载按**逆拓扑序**：consumer 先卸载，其依赖的 API 插件后卸载
+- 插件**必须**保持向后兼容：`PluginManifest`仅可追加字段，已发布字段的含义**禁止**更改
+
+##### API 插件规范
+
+- 共享插件 API（如`ykkz000_plugin_api_effecttype`、`ykkz000_plugin_api_persistence`）本身是插件：它们导出`GetPlugin`/`DestroyPlugin`/`GetPluginManifest`，由Loader 作为插件初始化以捕获`Host`
+- API 插件**禁止**包含与游戏玩法相关的具体逻辑；它们只提供通用的、与玩法无关的服务（如引擎访问、持久化、生命周期通知）
+- API 通过C-ABI的版本化入口导出（如`GetEffectTypeApi(uint32)`、`GetPersistenceApi(uint32)`），返回**只增不改**的POD函数表；**禁止**跨DLL边界传递STL类型、异常或由分配器拥有的对象
+- consumer **必须**在清单中声明对 API 插件的依赖，使其先于自身初始化，并直接`import` API入口函数
+
 ##### EffectType 定义代码规范
 
 - 定义EffectType的代码的源文件**必须**放在plugin的源代码目录的`src/effects`目录中，并以该EffectType的去除前两个单词的小写下划线拼写命名（允许长命名）

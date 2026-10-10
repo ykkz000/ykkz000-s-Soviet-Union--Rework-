@@ -2,57 +2,92 @@
 #include <ykkz000/export.h>
 
 #include <ykkz000/plugin/effects.h>
-#include <ykkz000/plugin/engine_access.h>
-#include <ykkz000/plugin/extra_persistence.h>
+#include <ykkz000/plugin/city_yield_common.h>
+#include <ykkz000/plugin/effect.h>
+#include <ykkz000/plugin/effecttype_api.h>
+#include <ykkz000/plugin/object_lifecycle.h>
+#include <ykkz000/plugin/persistence_api.h>
 
-// Strategy layer of the Soviet Union mod: registers the custom EffectTypes with the Loader and
-// forwards context events to each effect module.
-// This file knows no concrete effect: assembly and toggles live in each module's own .cpp; this
-// file only iterates the manifest.
+#include <ykkz000/civ6/common.h>
+
+// Consumer entry point of the Soviet Union mod.
+//
+// This plugin depends on two API plugins (declared in GetPluginManifest): the loader's dependency
+// topological order initializes them first, so by the time GetPlugin runs their exports are ready.
+// The effecttype API provides the shared Effect interface, engine access, and the registration
+// driver; the persistence API provides variable-description-driven AutoVariable persistence and
+// City/Unit lifecycle notifications. This file only assembles those services and iterates the effect
+// manifest -- it knows no concrete effect.
 namespace {
 
+const char* const kDependencies[] = {"ykkz000.api.effecttype", "ykkz000.api.persistence"};
+
+constexpr ykkz000::bridge::PluginManifest kManifest = {
+    sizeof(ykkz000::bridge::PluginManifest), // structSize
+    ykkz000::bridge::kHostApiVersion,        // apiVersion
+    "ykkz000.soviet_union",                  // name
+    1,                                       // versionMajor
+    0,                                       // versionMinor
+    0,                                       // versionPatch
+    kDependencies,                           // dependencies
+    sizeof(kDependencies) / sizeof(kDependencies[0]), // dependencyCount
+    ykkz000::bridge::kHostApiVersion,        // requiredHostApi
+};
+
 void OnGameContext(ykkz000::bridge::GameContextEvent event, void* context) {
-  if (event == ykkz000::bridge::GameContextEvent::kCreated) {
-    // Install the AutoVariable persistence hooks before any City/Unit is constructed in the new
-    // context; the effect modules then mirror/hydrate their side tables through them.
-    (void)ykkz000::plugin::EnsurePersistenceHooks();
-  }
   for (const ykkz000::plugin::Effect* effect : ykkz000::plugin::GetAllEffects()) {
     if (effect->on_context != nullptr) {
       effect->on_context(event, context);
     }
   }
-  if (event == ykkz000::bridge::GameContextEvent::kDestroyed) {
-    ykkz000::plugin::ShutdownPersistence();
-  }
 }
 
-int RegisterAll(ykkz000::bridge::Host* host) {
-  for (const ykkz000::plugin::Effect* effect : ykkz000::plugin::GetAllEffects()) {
-    const ykkz000::bridge::EffectDesc* desc = effect->describe(*host);
-    if (desc == nullptr) {
-      return -1;
-    }
-    // registerEffectType internally calls desc->prepare after registering; on failure it has
-    // already rolled back this registration.
-    const int result = host->registerEffectType(desc);
-    if (result != 0) {
-      return result;
-    }
-  }
-  return 0;
+int RegisterAll() {
+  const auto effects = ykkz000::plugin::GetAllEffects();
+  return ykkz000::plugin::Api()->register_effects(effects.data(),
+                                                  static_cast<std::uint32_t>(effects.size()));
 }
 
 } // namespace
+
+YKKZ000_PLUGIN_API const ykkz000::bridge::PluginManifest* GetPluginManifest() {
+  return &kManifest;
+}
 
 YKKZ000_PLUGIN_API int GetPlugin(ykkz000::bridge::Host* host) {
   if (host == nullptr || host->apiVersion < ykkz000::bridge::kHostApiVersion ||
       host->registerEffectType == nullptr || host->engine == nullptr) {
     return 0;
   }
-  ykkz000::plugin::SetContext(host);
+  const ykkz000::plugin::EffectTypeApi* effecttype =
+      GetEffectTypeApi(ykkz000::plugin::kEffectTypeApiVersion);
+  const ykkz000::plugin::PersistenceApi* persistence =
+      GetPersistenceApi(ykkz000::plugin::kPersistenceApiVersion);
+  if (effecttype == nullptr || persistence == nullptr) {
+    return 0;
+  }
+
+  // Capture this consumer's host for the shared engine-access layer.
+  effecttype->set_context(host);
+
+  // Declare the persisted city variables before the first game context is created.
+  if (persistence->declare_city_int_vector(ykkz000::plugin::kCityPercentVarName,
+                                           ykkz000::civ6::kMaxYields) == 0 ||
+      persistence->declare_city_int_vector(ykkz000::plugin::kCityPerSuzerainVarName,
+                                           ykkz000::civ6::kMaxYields) == 0) {
+    return 0;
+  }
+  // Register effects first: if this fails the loader unloads this module, and subscribing the
+  // lifecycle callbacks afterwards would leave a dangling subscriber in the persistence plugin.
+  if (RegisterAll() != 0) {
+    return 0;
+  }
+  if (!ykkz000::plugin::RegisterObjectLifecycle()) {
+    return 0;
+  }
+
   host->onGameContext = &OnGameContext; // Register the context callback the Loader broadcasts through.
-  return RegisterAll(host) == 0 ? 1 : 0;
+  return 1;
 }
 
 YKKZ000_PLUGIN_API void DestroyPlugin() {
@@ -61,6 +96,9 @@ YKKZ000_PLUGIN_API void DestroyPlugin() {
       effect->shutdown();
     }
   }
-  ykkz000::plugin::ResetPersistenceForUnload();
-  ykkz000::plugin::SetContext(nullptr);
+  if (const ykkz000::plugin::EffectTypeApi* api =
+          GetEffectTypeApi(ykkz000::plugin::kEffectTypeApiVersion);
+      api != nullptr) {
+    api->set_context(nullptr);
+  }
 }

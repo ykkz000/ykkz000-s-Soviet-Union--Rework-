@@ -1,0 +1,31 @@
+#include <windows.h>
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION     1,0,0,0
+ PRODUCTVERSION  1,0,0,0
+ FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+ FILEFLAGS       0x0L
+ FILEOS          VOS_NT_WINDOWS32
+ FILETYPE        VFT_DLL
+ FILESUBTYPE     VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "ykkz000\0"
+            VALUE "FileDescription",  "EffectType API plugin for ykkz000's Soviet Union (Rework)\0"
+            VALUE "FileVersion",      "1.0.0.0\0"
+            VALUE "InternalName",     "ykkz000_plugin_api_effecttype\0"
+            VALUE "LegalCopyright",   "Copyright (C) 2026 ykkz000.\0"
+            VALUE "OriginalFilename", "ykkz000_plugin_api_effecttype.dll\0"
+            VALUE "ProductName",      "ykkz000's Soviet Union (Rework)\0"
+            VALUE "ProductVersion",   "1.0.0.0\0"
+            VALUE "Comments",         "No third-party code is linked into this plugin.\0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

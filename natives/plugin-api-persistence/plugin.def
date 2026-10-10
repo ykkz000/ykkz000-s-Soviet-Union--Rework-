@@ -1,0 +1,6 @@
+LIBRARY ykkz000_plugin_api_persistence
+EXPORTS
+  GetPlugin
+  DestroyPlugin
+  GetPluginManifest
+  GetPersistenceApi

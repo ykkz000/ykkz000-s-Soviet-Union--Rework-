@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <cstring>
 #include <shared_mutex>
 #include <unordered_map>
 
@@ -11,7 +12,7 @@
 #include <ykkz000/civ6/effect.h>
 
 #include <ykkz000/plugin/engine_access.h>
-#include <ykkz000/plugin/extra_persistence.h>
+#include <ykkz000/plugin/persistence_api.h>
 
 namespace ykkz000::plugin {
 namespace {
@@ -327,6 +328,34 @@ int SuzerainCountForPlayer(std::int32_t player_id) {
     kSuzerainCache[player_id] = SuzerainCountEntry{count, now + kSuzerainCountTtl};
   }
   return count;
+}
+
+void PersistCityValues(void* city, const std::int32_t* percent,
+                       const std::int32_t* per_suzerain) {
+  const PersistenceApi* api = Persistence();
+  if (api == nullptr || city == nullptr) {
+    return;
+  }
+  api->store_city_int_vector(city, kCityPercentVarName, percent, civ6::kMaxYields);
+  api->store_city_int_vector(city, kCityPerSuzerainVarName, per_suzerain, civ6::kMaxYields);
+}
+
+bool LoadCityValues(void* city, std::int32_t* percent_out, std::int32_t* per_suzerain_out) {
+  if (percent_out == nullptr || per_suzerain_out == nullptr) {
+    return false;
+  }
+  const std::size_t bytes = static_cast<std::size_t>(civ6::kMaxYields) * sizeof(std::int32_t);
+  const PersistenceApi* api = Persistence();
+  if (api == nullptr) {
+    std::memset(percent_out, 0, bytes);
+    std::memset(per_suzerain_out, 0, bytes);
+    return false;
+  }
+  const bool percent =
+      api->load_city_int_vector(city, kCityPercentVarName, percent_out, civ6::kMaxYields) != 0;
+  const bool per_suzerain = api->load_city_int_vector(city, kCityPerSuzerainVarName, per_suzerain_out,
+                                                      civ6::kMaxYields) != 0;
+  return percent || per_suzerain;
 }
 
 } // namespace ykkz000::plugin

@@ -6,9 +6,15 @@
 # is deployed into the dedicated directory scanned by the loader. DllPrefix must match
 # the DllPrefix used in Data/YKKZ000_GameCores.sql.
 $LoaderTarget     = 'YKKZ000Loader'
-$PluginTarget     = 'YKKZ000SovietUnionPlugin'
+$PluginTargets    = @('YKKZ000SovietUnionPlugin', 'YKKZ000PluginApiEffectType', 'YKKZ000PluginApiPersistence')
 $LoaderBuildDll   = 'GameCore_YKKZ000_Loader_XP2.dll'
-$PluginDll        = 'Plugin_YKKZ000_Soviet_Union.dll'
+# Deployed plugin DLLs: the Soviet Union consumer plus the two shared API plugins. All are copied into
+# the single loader-scanned plugin directory (the loader resolves the consumer's imports from there).
+$PluginDlls       = @(
+  'Plugin_YKKZ000_Soviet_Union.dll',
+  'ykkz000_plugin_api_effecttype.dll',
+  'ykkz000_plugin_api_persistence.dll'
+)
 $DeployBinRel     = 'Binaries/Win64'
 $DeployPluginRel  = 'Binaries/Win64/ykkz000_civ6_plugin'
 $DefaultDllPrefix = 'GameCore_YKKZ000_Loader_XP2'
@@ -742,8 +748,9 @@ function Invoke-DllBuild {
     throw "CMake configuration failed (exit $LASTEXITCODE)."
   }
 
-  Write-Host ("Building DLL targets: {0}, {1}" -f $LoaderTarget, $PluginTarget)
-  & $CMake --build $BuildDir --config $Config --target $LoaderTarget $PluginTarget
+  $allTargets = @($LoaderTarget) + $PluginTargets
+  Write-Host ("Building DLL targets: {0}" -f ($allTargets -join ', '))
+  & $CMake --build $BuildDir --config $Config --target $allTargets
   if ($LASTEXITCODE -ne 0) {
     throw "CMake build failed (exit $LASTEXITCODE)."
   }
@@ -775,24 +782,27 @@ function Copy-DllArtifacts {
   New-Item -ItemType Directory -Path $pluginDir -Force -ErrorAction Stop | Out-Null
 
   $loaderSrc = Find-DllArtifact -BuildDir $Ctx.DllBuildDir -Config $Ctx.DllConfig -FileName $LoaderBuildDll
-  $pluginSrc = Find-DllArtifact -BuildDir $Ctx.DllBuildDir -Config $Ctx.DllConfig -FileName $PluginDll
-
   $loaderName = $Ctx.DllPrefix + '_FinalRelease.dll'
   $loaderDst = Join-Path $binDir $loaderName
-  $pluginDst = Join-Path $pluginDir $PluginDll
   if (-not (Test-PathUnder $loaderDst $Ctx.Out)) {
     throw "The loader deploy path escapes the output directory: $loaderDst"
   }
-  if (-not (Test-PathUnder $pluginDst $Ctx.Out)) {
-    throw "The plugin deploy path escapes the output directory: $pluginDst"
-  }
   Copy-Item -LiteralPath $loaderSrc -Destination $loaderDst -Force -ErrorAction Stop
-  Copy-Item -LiteralPath $pluginSrc -Destination $pluginDst -Force -ErrorAction Stop
 
-  return @(
-    ($DeployBinRel + '/' + $loaderName),
-    ($DeployPluginRel + '/' + $PluginDll)
-  )
+  $deployed = New-Object System.Collections.Generic.List[string]
+  $deployed.Add($DeployBinRel + '/' + $loaderName)
+
+  foreach ($dll in $PluginDlls) {
+    $pluginSrc = Find-DllArtifact -BuildDir $Ctx.DllBuildDir -Config $Ctx.DllConfig -FileName $dll
+    $pluginDst = Join-Path $pluginDir $dll
+    if (-not (Test-PathUnder $pluginDst $Ctx.Out)) {
+      throw "The plugin deploy path escapes the output directory: $pluginDst"
+    }
+    Copy-Item -LiteralPath $pluginSrc -Destination $pluginDst -Force -ErrorAction Stop
+    $deployed.Add($DeployPluginRel + '/' + $dll)
+  }
+
+  return $deployed
 }
 
 function Get-DeployedDllFiles {
@@ -800,9 +810,11 @@ function Get-DeployedDllFiles {
 
   $result = New-Object System.Collections.Generic.List[string]
   $candidates = @(
-    ($DeployBinRel + '/' + ($Ctx.DllPrefix + '_FinalRelease.dll')),
-    ($DeployPluginRel + '/' + $PluginDll)
+    ($DeployBinRel + '/' + ($Ctx.DllPrefix + '_FinalRelease.dll'))
   )
+  foreach ($dll in $PluginDlls) {
+    $candidates += ($DeployPluginRel + '/' + $dll)
+  }
   foreach ($rel in $candidates) {
     $full = Join-Path $Ctx.Out ($rel -replace '/', '\')
     if (Test-Path -LiteralPath $full -PathType Leaf) {
@@ -1237,8 +1249,8 @@ function Main {
   }
   else {
     $dllFiles = @(Get-DeployedDllFiles -Ctx $ctx)
-    if ($dllFiles.Count -lt 2) {
-      throw "Option '--skip=dll' was given, but the expected loader and plugin DLLs were not found in '$($ctx.Out)'. Build once without '--skip=dll' first."
+    if ($dllFiles.Count -lt (1 + $PluginDlls.Count)) {
+      throw "Option '--skip=dll' was given, but the expected loader and plugin DLLs were not all found in '$($ctx.Out)'. Build once without '--skip=dll' first."
     }
   }
 

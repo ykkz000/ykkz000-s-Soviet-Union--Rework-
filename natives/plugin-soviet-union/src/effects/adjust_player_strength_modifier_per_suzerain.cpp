@@ -12,7 +12,6 @@
 #include <ykkz000/extra/player_extra.h>
 
 #include <ykkz000/plugin/engine_access.h>
-#include <ykkz000/plugin/object_cleanup.h>
 
 // Unit strength modifier of "per suzerain city x Amount".
 //
@@ -432,19 +431,15 @@ void UninstallHook() {
   extra::PlayerExtras().Clear();
 }
 
-// Context lifecycle: enable the hook on created; disable and clear the cache on destroyed. The
-// object-destruction cleanup hooks are installed alongside the write-point hook so a unit destroyed
-// without a template Remove (death/disband) still drops its side-table entry.
+// Context lifecycle: enable the hook on created; disable and clear the cache on destroyed. City/Unit
+// destruction cleanup is handled by the persistence API's lifecycle service.
 void OnContext(bridge::GameContextEvent event, void* /*context*/) {
   if (event == bridge::GameContextEvent::kCreated) {
     (void)InstallHooksOnce();
-    (void)EnsureObjectCleanupHooks();
     ResetWindow();
     extra::PlayerExtras().Clear(); // New context: old player/city/unit keys are all invalid
     return;
   }
-  // Remove the destructor hooks first (the context has already been torn down) before clearing.
-  RemoveObjectCleanupHooks();
   UninstallHook();
 }
 

@@ -264,6 +264,16 @@ void installCrashCapture() {
   if (g_vehHandle != nullptr) {
     return; // idempotent
   }
+  // Truncate the crash log once per process, before the handler can append: each run starts empty.
+  // crashWrite keeps using FILE_APPEND_DATA so several crashes within one run still accumulate.
+  const wchar_t* path = crashLogPath();
+  if (path[0] != L'\0') {
+    HANDLE file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                              CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file != INVALID_HANDLE_VALUE) {
+      CloseHandle(file);
+    }
+  }
   // 1 = called first (captures the exception before the engine's SEH)
   g_vehHandle = AddVectoredExceptionHandler(
       1, reinterpret_cast<PVECTORED_EXCEPTION_HANDLER>(&CrashCapture_Handler));

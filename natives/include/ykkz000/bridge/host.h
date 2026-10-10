@@ -13,7 +13,7 @@ namespace ykkz000::bridge {
 /// @note Evolves under an "append-only" policy: new fields may only be appended, and the meaning
 ///       of existing fields never changes; plugins use this to decide whether the host supports
 ///       the capabilities they need.
-inline constexpr std::uint32_t kHostApiVersion = 15;
+inline constexpr std::uint32_t kHostApiVersion = 17;
 
 struct Host;
 
@@ -23,6 +23,19 @@ using MakeHashFn          = std::uint32_t (*)(const char*);
 using LogFn               = void (*)(int level, const char* msg);
 /// @brief Get the effect registry handle.
 using GetEffectRegistryFn = void* (*)();
+
+/// @note Added in v17 (append-only): engine-enabled-mod enumeration.
+/// @brief Number of mods the engine has enabled for this session.
+/// @return Count, or 0 when the engine has not yet published the enabled-mod list.
+using GetEnabledModCountFn = std::uint32_t (*)();
+/// @brief Copy the UTF-8 id (the .modinfo UUID) of one enabled mod into a caller buffer.
+/// @param[in] index Zero-based enabled-mod index.
+/// @param[out] buffer Destination buffer.
+/// @param[in] capacity Buffer size in bytes.
+/// @return Bytes written excluding the terminator, or 0 when the index is out of range, the buffer
+///         is too small, or the enabled-mod list is unavailable.
+using GetEnabledModIdFn = std::uint32_t (*)(std::uint32_t index, char* buffer,
+                                            std::uint32_t capacity);
 
 /// @brief Uniform signature for the Apply/Remove slots of an effect object.
 /// @note The engine passes arguments according to the template's real signature; here they are
@@ -202,6 +215,15 @@ struct EngineApi {
   /// @brief City yield int-vector loader (load-only). Signature:
   ///       void (void* stream, void* yieldVector, char flag). RVA 0x0296F0.
   void* cityYieldIntVectorLoad;
+
+  /// @note Added in v17 (append-only): the engine's live enabled-mod list, read from the in-memory
+  ///       modding settings. A plugin can use it to gate content on which other mods are active.
+  ///       The list is a snapshot taken from the engine; when the engine has not yet published the
+  ///       settings, the count is 0 and no id can be read.
+  /// @brief Number of mods currently enabled by the engine in this session.
+  GetEnabledModCountFn getEnabledModCount;
+  /// @brief Copy the index-th enabled mod's id into buffer (see GetEnabledModIdFn).
+  GetEnabledModIdFn    getEnabledModId;
 };
 
 /// @brief Install a hook.
@@ -290,9 +312,32 @@ using GetPluginFn     = int  (*)(Host* host);
 ///   resources.
 using DestroyPluginFn = void (*)();
 
+/// @brief Plugin manifest returned by the GetPluginManifest export.
+/// @note A POD whose storage (the name string and the dependency-name array) is owned by the plugin
+///       module and must stay valid for as long as the module is loaded. The loader reads it before
+///       any GetPlugin call to build the dependency graph and order initialization.
+struct PluginManifest {
+  std::uint32_t structSize;        ///< sizeof(PluginManifest) as seen by the plugin build
+  std::uint32_t apiVersion;        ///< Host API version the plugin was built against
+  const char* name;                ///< Unique logical plugin id (required; never null/empty)
+  std::uint32_t versionMajor;      ///< Plugin version major (informational)
+  std::uint32_t versionMinor;      ///< Plugin version minor (informational)
+  std::uint32_t versionPatch;      ///< Plugin version patch (informational)
+  const char* const* dependencies; ///< Dependency plugin names (may be null when none)
+  std::uint32_t dependencyCount;   ///< Number of dependency names in dependencies
+  std::uint32_t requiredHostApi;   ///< Minimum host API version required by this plugin
+};
+
+/// @brief Plugin manifest export entry point: called by the loader before GetPlugin to build the
+///   dependency graph.
+/// @return Pointer to the plugin's resident manifest; the module keeps it alive.
+using GetPluginManifestFn = const PluginManifest* (*)();
+
 } // namespace ykkz000::bridge
 
 /// @brief Plugin export name "GetPlugin".
 #define YKKZ000_PLUGIN_EXPORT_GETPLUGIN  "GetPlugin"
 /// @brief Plugin export name "DestroyPlugin".
 #define YKKZ000_PLUGIN_EXPORT_DESTROY    "DestroyPlugin"
+/// @brief Plugin export name "GetPluginManifest".
+#define YKKZ000_PLUGIN_EXPORT_GETPLUGINMANIFEST "GetPluginManifest"

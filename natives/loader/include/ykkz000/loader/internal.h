@@ -161,6 +161,17 @@ struct GameCoreApi {
   ///       entry; when missing, only the corresponding hook is skipped (diagnostics + invalid
   ///       handler guard).
   void*   effectHandlerDispatch = nullptr;
+  /// @note Enabled-mod query (optional, non-fatal). The engine keeps the live modding settings in an
+  ///       in-memory object whose pointer lives in a global; the object is null until the engine
+  ///       publishes the settings. enabledModsContainer is the address of that global (a data
+  ///       pointer), getEnabledMods is the accessor FUN_180164870(container, out) that enumerates
+  ///       the ENABLED_MODS collection into an engine vector of {const char* id, const char* title}
+  ///       entries, and vectorDeallocate is the engine's std::vector release helper FUN_18009d470
+  ///       used to free that vector. When any of them is missing the enabled-mod list is reported
+  ///       as unavailable and cross-mod discovery degrades to the loader's own directory.
+  void*   enabledModsContainer = nullptr; ///< Address of the settings-container global (data)
+  void*   getEnabledMods = nullptr;       ///< FUN_180164870(container, out)
+  void*   vectorDeallocate = nullptr;     ///< FUN_18009d470(vector, data, count)
 };
 
 /// @brief Get this DLL's directory.
@@ -175,6 +186,14 @@ struct GameCoreApi {
 /// @brief Engine entry-point set (populated after gameCore resolves successfully; fields are
 ///        null before resolution).
 [[nodiscard]] const bridge::EngineApi& engineApi();
+
+// gamecore.cpp: enabled-mod query (the engine's live in-memory modding settings).
+/// @brief Read the engine's enabled-mod ids (a snapshot).
+/// @param[out] out Receives the ids when the list is available; left unchanged otherwise.
+/// @return true when the engine's enabled-mod list was read; false while it is not yet available
+///         (the engine publishes the settings only after it has loaded them).
+/// @note The first successful read is cached for the process lifetime.
+[[nodiscard]] bool enabledModIds(std::vector<std::string>& out);
 
 /// @brief Compute a string hash (same algorithm as the engine's MakeHash).
 /// @param[in] text Input text.

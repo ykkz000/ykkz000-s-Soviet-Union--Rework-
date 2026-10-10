@@ -59,4 +59,17 @@ target_compile_features(ykkz000_bridge INTERFACE cxx_std_20)
 # compile definition is propagated: _DEBUG is toolchain-provided.
 
 add_subdirectory(loader)
+
+# Shared plugin APIs. Each is a real plugin (it exports GetPlugin/GetPluginManifest) so the loader
+# initializes it before the consumers that declare it as a manifest dependency.
+add_subdirectory(plugin-api-effecttype)
+add_subdirectory(plugin-api-persistence)
+
+# Header/link aggregation for consumers: linking ykkz000_plugin_api pulls in both API plugins'
+# headers and import libraries.
+add_library(ykkz000_plugin_api INTERFACE)
+target_link_libraries(ykkz000_plugin_api INTERFACE
+  YKKZ000PluginApiEffectType
+  YKKZ000PluginApiPersistence)
+
 add_subdirectory(plugin-soviet-union)

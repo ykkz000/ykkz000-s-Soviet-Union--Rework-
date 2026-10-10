@@ -3,30 +3,17 @@
 #include <span>
 
 #include <ykkz000/bridge/host.h>
+#include <ykkz000/plugin/effect.h>
 
 /// @file effects.h
-/// @brief Plugin-side custom effect interface and the manifest of all custom effects.
-/// @note Collapses all assembly and lifecycle of "one custom effect" into a single resident
-///       instance. Each effect's implementation lives in its own .cpp under src/effects
-///       (assembling its own resident EffectImpl/EffectDesc); plugin.cpp only iterates the manifest
-///       and knows no concrete effect's name, fields, or toggles.
+/// @brief Plugin-side manifest of all custom effects.
+/// @note The shared Effect interface lives in the effecttype API plugin (<ykkz000/plugin/effect.h>).
+///       Each effect's implementation lives in its own .cpp under src/effects (assembling its own
+///       resident EffectImpl/EffectDesc); plugin.cpp only iterates the manifest and knows no concrete
+///       effect's name, fields, or toggles.
 /// @note Adding an effect = create src/effects/<name>.cpp, declare its Get...Effect entry here, and
 ///       add one line to GetAllEffects; plugin.cpp needs no changes.
 namespace ykkz000::plugin {
-
-/// @brief The three-function interface of one custom effect.
-struct Effect {
-  const char* name; ///< Diagnostic name.
-  /// @brief Assembles the effect description, which the caller registers.
-  /// @param[in] host Host service table.
-  /// @return Pointer to the resident EffectDesc.
-  const bridge::EffectDesc* (*describe)(const bridge::Host& host);
-  /// @brief Context lifecycle callback; may be null.
-  /// @param[in] event Event type.
-  /// @param[in] context Context pointer.
-  void (*on_context)(bridge::GameContextEvent event, void* context);
-  void (*shutdown)(); ///< Unload cleanup; may be null.
-};
 
 /// @brief EffectType EFFECT_YKKZ000_ADJUST_CITY_YIELD_MODIFIER_PER_POPULATION entry.
 /// @return Resident Effect pointer for the manifest to enumerate.

@@ -29,7 +29,9 @@
 // reported as failure -- otherwise a plugin would treat an already-enabled hook as an install
 // failure and clear the trampoline, leaving a silent-drop state that "still intercepts but no
 // longer forwards". Reinstalling the same target must reuse the existing trampoline and write it
-// back to the caller's original.
+// back to the caller's original. The trampoline is stored in the record itself, so the reuse path
+// does not depend on the plugin's original variable still holding it (a plugin may null its
+// *Original between contexts).
 namespace ykkz000::loader {
 namespace {
 
@@ -37,6 +39,7 @@ struct HookRecord {
   void* detour = nullptr;
   void** original = nullptr;
   void* pluginHandle = nullptr;
+  void* trampoline = nullptr; // service-owned; the trampoline survives a plugin clearing *original
 };
 
 std::mutex g_hookMutex;
@@ -105,6 +108,7 @@ int serviceInstallHook(void* pluginHandle, void* target, void* detour, void** or
     record.detour = detour;
     record.original = original;
     record.pluginHandle = pluginHandle;
+    record.trampoline = trampoline;
     if (trampoline != nullptr) {
       *original = trampoline;
     }
@@ -120,9 +124,12 @@ int serviceInstallHook(void* pluginHandle, void* target, void* detour, void** or
       logWarnF("hook: target=%p already hooked with a different detour; refusing", target);
       return -3;
     }
-    if (record.original != nullptr && *record.original != nullptr) {
-      *original = *record.original; // reuse the existing trampoline (re-enable case)
-      logInfoF("hook: reuse target=%p trampoline=%p", target, *record.original);
+    if (record.trampoline != nullptr) {
+      // Reuse the trampoline this service holds, independent of whether the plugin still keeps it:
+      // a plugin may clear its *Original between contexts, and the caller must still receive a valid
+      // trampoline so an already-installed hook is not mistaken for an install failure.
+      *original = record.trampoline;
+      logInfoF("hook: reuse target=%p trampoline=%p", target, record.trampoline);
     }
     if (pluginHandle != nullptr && record.pluginHandle == nullptr) {
       record.pluginHandle = pluginHandle; // upgrade ownership to the plugin

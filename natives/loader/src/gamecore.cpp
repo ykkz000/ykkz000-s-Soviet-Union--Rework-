@@ -163,6 +163,13 @@ struct BuildProfile {
   std::ptrdiff_t rvaProfiledHandlerApply;
   // handler dispatch thunk (code): diagnose bad handler ownership + invalid-handler guard.
   std::ptrdiff_t rvaEffectHandlerDispatch;
+  // Enabled-mod query (optional, non-fatal): the address of the global that holds the engine's
+  // in-memory modding settings container (a data pointer, null until the engine publishes the
+  // settings), the accessor FUN_180164870(container, out) that enumerates the ENABLED_MODS
+  // collection into an engine vector, and the engine's std::vector release helper FUN_18009d470.
+  std::ptrdiff_t rvaEnabledModsContainer;
+  std::ptrdiff_t rvaGetEnabledMods;
+  std::ptrdiff_t rvaVectorDeallocate;
   // Anchor RVAs: used for the "identity self-check" (see resolveApi); they corroborate the
   // fingerprint.
   std::ptrdiff_t rvaEffectAnchor;
@@ -214,6 +221,9 @@ constexpr BuildProfile kKnownXp2Build{
     0x46B0D0,     // descriptor table [0]: FUN_18046b0d0(self, args) analyzer
     0x46B390,     // descriptor table [1]: FUN_18046b390(self, context, args) apply
     0x979290,     // handler dispatch thunk: rcx=[rcx+0x18]; jmp [rax+0x30]
+    0xB8AA78,     // enabled-mod settings container pointer (data; DAT_180b8aa60 + 0x1B0)
+    0x164870,     // FUN_180164870(container, out): enumerate the ENABLED_MODS collection
+    0x9D470,      // FUN_18009d470(vector, data, count): engine std::vector release helper
     0xAA4558,     // anchor: "Could not build a modifier factory because the effect <"
     0xAA4500,     // anchor: "… because the collection <"
     0xAA3A80,     // anchor: "INSERT OR IGNORE INTO Types(Type,Kind) VALUES(?,?)"
@@ -438,6 +448,10 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
   resolved.profiledHandlerAnalyze = computeRva(kKnownXp2Build.rvaProfiledHandlerAnalyze);
   resolved.profiledHandlerApply = computeRva(kKnownXp2Build.rvaProfiledHandlerApply);
   resolved.effectHandlerDispatch = computeRva(kKnownXp2Build.rvaEffectHandlerDispatch);
+  resolved.enabledModsContainer =
+      computeDataRva(kKnownXp2Build.rvaEnabledModsContainer);
+  resolved.getEnabledMods = computeRva(kKnownXp2Build.rvaGetEnabledMods);
+  resolved.vectorDeallocate = computeRva(kKnownXp2Build.rvaVectorDeallocate);
   resolved.module = module;
   // Record each entry's actual RVA (pure arithmetic check; identity verification was already done
   // by the anchor comparison above).
@@ -518,6 +532,11 @@ bool resolveApi(HMODULE module, GameCoreApi& out) {
          kKnownXp2Build.rvaProfiledHandlerApply);
   logRva("effectHandlerDispatch", resolved.effectHandlerDispatch, module,
          kKnownXp2Build.rvaEffectHandlerDispatch);
+  logRva("getEnabledMods", resolved.getEnabledMods, module,
+         kKnownXp2Build.rvaGetEnabledMods);
+  logRva("vectorDeallocate", resolved.vectorDeallocate, module,
+         kKnownXp2Build.rvaVectorDeallocate);
+  logDebugF("enabledModsContainer global=%p", resolved.enabledModsContainer);
   // cityCalculateYield / trackedValueAddStep are not fatal checks: when missing, the plugin skips
   // the corresponding hook/injection and the effect degrades gracefully, rather than preventing the
   // whole Loader from initializing.
@@ -578,6 +597,134 @@ HMODULE tryLoadPath(const std::wstring& full) {
   return module;
 }
 
+// Enabled-mod query. The engine keeps the live modding settings in an in-memory object; the
+// accessor FUN_180164870 enumerates the ENABLED_MODS collection into an engine vector whose
+// elements are 0x10-byte {const char* id, const char* title} pairs. The vector's storage comes from
+// the engine allocator, so it must be released with the engine's own deallocator.
+//
+// The two engine calls are wrapped in small SEH helpers with no C++ unwinding, so a faulting call
+// degrades to "unavailable" instead of taking down the process (the crash VEH passes through while
+// g_guardedCallActive is set).
+struct EngineEnabledModsVector {
+  void* begin;
+  void* end;
+  void* cap;
+};
+
+bool callGetEnabledMods(void* function, void* container, void* out) {
+  using GetEnabledModsFn = void* (*)(void*, void*);
+  g_guardedCallActive = true;
+  __try {
+    reinterpret_cast<GetEnabledModsFn>(function)(container, out);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    g_guardedCallActive = false;
+    return false;
+  }
+  g_guardedCallActive = false;
+  return true;
+}
+
+bool callVectorDeallocate(void* function, void* vector, void* data, std::size_t count) {
+  using DeallocateFn = void (*)(void*, void*, std::size_t);
+  g_guardedCallActive = true;
+  __try {
+    reinterpret_cast<DeallocateFn>(function)(vector, data, count);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+    g_guardedCallActive = false;
+    return false;
+  }
+  g_guardedCallActive = false;
+  return true;
+}
+
+std::mutex g_enabledModsMutex;
+bool g_enabledModsQueried = false;
+std::vector<std::string> g_enabledMods;
+
+// One engine query. Returns false while the settings container is not yet published or the call
+// fails; on success fills out (possibly empty) and returns true.
+bool queryEnabledMods(std::vector<std::string>& out) {
+  const GameCoreApi& api = gameCore();
+  if (api.enabledModsContainer == nullptr || api.getEnabledMods == nullptr) {
+    return false;
+  }
+  void* container = nullptr;
+  if (!tryReadField(api.enabledModsContainer, 0, container) || container == nullptr ||
+      !isCandidateObject(container)) {
+    return false; // the engine has not published the modding settings yet
+  }
+
+  EngineEnabledModsVector vector{};
+  if (!callGetEnabledMods(api.getEnabledMods, container, &vector)) {
+    logWarn("enabled mods: engine enumeration raised; treating the list as unavailable");
+    return false;
+  }
+
+  if (vector.begin != nullptr && vector.end != nullptr && vector.end >= vector.begin) {
+    const auto* first = static_cast<const char*>(vector.begin);
+    const auto* last = static_cast<const char*>(vector.end);
+    // Sanity-cap the walk so a malformed vector header cannot drive an unbounded scan.
+    if (static_cast<std::size_t>(last - first) <= (1u << 20)) {
+      for (const char* entry = first; entry + 0x10 <= last; entry += 0x10) {
+        if (!isReadableRegion(entry, 0x10)) {
+          break;
+        }
+        const char* id = *reinterpret_cast<const char* const*>(entry);
+        if (id != nullptr && isReadableRegion(id, 1) && id[0] != '\0') {
+          out.emplace_back(id);
+        }
+      }
+    }
+  }
+
+  // Release the engine vector with the engine's own deallocator (capacity count, not size).
+  if (vector.begin != nullptr && api.vectorDeallocate != nullptr && vector.cap >= vector.begin) {
+    const std::size_t count =
+        (static_cast<const char*>(vector.cap) - static_cast<const char*>(vector.begin)) / 0x10;
+    if (count <= (1u << 20) / 0x10 &&
+        !callVectorDeallocate(api.vectorDeallocate, &vector, vector.begin, count)) {
+      logWarn("enabled mods: engine vector release raised; the vector may leak");
+    }
+  }
+  return true;
+}
+
+// Cache the first successful query: the enabled set is fixed for the process lifetime once the
+// engine has published it.
+void refreshEnabledModsLocked() {
+  if (g_enabledModsQueried) {
+    return;
+  }
+  std::vector<std::string> ids;
+  if (queryEnabledMods(ids)) {
+    g_enabledMods = std::move(ids);
+    g_enabledModsQueried = true;
+  }
+}
+
+std::uint32_t enabledModCount() {
+  std::lock_guard<std::mutex> guard(g_enabledModsMutex);
+  refreshEnabledModsLocked();
+  return static_cast<std::uint32_t>(g_enabledMods.size());
+}
+
+std::uint32_t enabledModIdAt(std::uint32_t index, char* buffer, std::uint32_t capacity) {
+  if (buffer == nullptr || capacity == 0) {
+    return 0;
+  }
+  std::lock_guard<std::mutex> guard(g_enabledModsMutex);
+  refreshEnabledModsLocked();
+  if (index >= g_enabledMods.size()) {
+    return 0;
+  }
+  const std::string& id = g_enabledMods[index];
+  if (id.size() + 1 > capacity) {
+    return 0;
+  }
+  std::memcpy(buffer, id.c_str(), id.size() + 1);
+  return static_cast<std::uint32_t>(id.size());
+}
+
 // Build the plugin-visible EngineApi (a read-only set of function pointers) from the resolved
 // GameCoreApi. Only "mechanism entries" are exposed, with no behavior policy; proposedCombatAdjust
 // is the combat-strength modifier write point FUN_180944040 (DB name
@@ -614,6 +761,8 @@ void publishEngineApi(const GameCoreApi& api) {
   engine.unitDestructor = api.unitDestructor;                                 // added in v14
   engine.autoVarIntArrayBlock = api.autoVarIntArrayBlock;                     // added in v15
   engine.cityYieldIntVectorLoad = api.cityYieldIntVectorLoad;                 // added in v15
+  engine.getEnabledModCount = &enabledModCount;                               // added in v17
+  engine.getEnabledModId = &enabledModIdAt;                                   // added in v17
   engine.getPlayer = api.getPlayerByIndex;
   engine.getGameManager = api.getGameManager;
   g_engineApi = engine;
@@ -634,6 +783,16 @@ std::wstring moduleDirectory() {
 
 std::uint32_t makeHash(const char* text) {
   return bridge::makeHash(text);
+}
+
+bool enabledModIds(std::vector<std::string>& out) {
+  std::lock_guard<std::mutex> guard(g_enabledModsMutex);
+  refreshEnabledModsLocked();
+  if (!g_enabledModsQueried) {
+    return false;
+  }
+  out = g_enabledMods;
+  return true;
 }
 
 bool ensureGameCoreLoaded() {

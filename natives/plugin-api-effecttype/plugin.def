@@ -1,0 +1,6 @@
+LIBRARY ykkz000_plugin_api_effecttype
+EXPORTS
+  GetPlugin
+  DestroyPlugin
+  GetPluginManifest
+  GetEffectTypeApi

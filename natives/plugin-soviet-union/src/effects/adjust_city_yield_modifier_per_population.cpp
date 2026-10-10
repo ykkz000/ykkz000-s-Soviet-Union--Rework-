@@ -16,8 +16,6 @@
 
 #include <ykkz000/plugin/city_yield_common.h>
 #include <ykkz000/plugin/engine_access.h>
-#include <ykkz000/plugin/extra_persistence.h>
-#include <ykkz000/plugin/object_cleanup.h>
 
 // Injection host for city-yield modifiers: append two "multiply at read time" modifiers on the
 // engine's yield read path City::Instance::CalculateYield --
@@ -375,17 +373,13 @@ void UninstallHook() {
 }
 
 // Context lifecycle: enable the hook and clear the side table on created; disable and clear on
-// destroyed. The object-destruction cleanup hooks are installed alongside the yield hook so a city
-// destroyed without a template Remove (razing/capture) still drops its side-table records.
+// destroyed. City/Unit destruction cleanup is handled by the persistence API's lifecycle service.
 void OnContext(bridge::GameContextEvent event, void* /*context*/) {
   if (event == bridge::GameContextEvent::kCreated) {
     (void)InstallHooksOnce();
-    (void)EnsureObjectCleanupHooks();
     ClearExtras(); // New context: old city keys are all invalid
     return;
   }
-  // Remove the destructor hooks first (while the context is gone) before clearing the side table.
-  RemoveObjectCleanupHooks();
   UninstallHook();
 }
 

@@ -38,6 +38,26 @@ inline constexpr std::int32_t kPercentUnit = 0x10000;
 ///        values).
 inline constexpr int kMaxPlausibleAmount = 100000;
 
+/// @brief Persistence variable names, declared through the persistence API plugin.
+/// @note Stable once shipped: the engine archive resolves variables by name on load.
+inline constexpr char kCityPercentVarName[] = "m_aYkkz000YieldPercentPerPopulation";
+inline constexpr char kCityPerSuzerainVarName[] = "m_aYkkz000YieldPercentPerSuzerain";
+
+/// @brief Copies the city yield percentage arrays into the city's persisted AutoVariables.
+/// @param[in] city City instance.
+/// @param[in] percent per-citizen array of kMaxYields entries.
+/// @param[in] per_suzerain per-suzerain array of kMaxYields entries.
+/// @note No-op when persistence is inactive or the city has no registered variables.
+void PersistCityValues(void* city, const std::int32_t* percent, const std::int32_t* per_suzerain);
+
+/// @brief Reads the city yield percentage arrays from the city's persisted AutoVariables.
+/// @param[in] city City instance.
+/// @param[out] percent_out Receives kMaxYields entries (zeroed first).
+/// @param[out] per_suzerain_out Receives kMaxYields entries (zeroed first).
+/// @return true when the city has registered variables and at least one stored value is non-zero.
+[[nodiscard]] bool LoadCityValues(void* city, std::int32_t* percent_out,
+                                  std::int32_t* per_suzerain_out);
+
 /// @brief Reads the (YieldType, Amount) entries on an effect object.
 /// @param[in] self Effect object.
 /// @param[out] out Receives the entry list.
